@@ -1208,18 +1208,59 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
     }
     html += '</div>';
 
-    // Grand summary table
-    html += '<div class="section"><div class="section-title">Resumen por Profesor</div>';
-    html += '<div class="summary-table"><table><thead><tr><th>Profesor</th><th class="num">Ses</th><th class="num">PT</th><th class="num">Staff</th><th class="num">Box</th><th class="num">Com</th><th class="num">Total</th></tr></thead><tbody>';
-    let gSes = 0, gPT = 0, gSt = 0, gBx = 0, gCo = 0, gTo = 0;
+    // Grand summary table - build data for both display and export
+    const summaryData = [];
     for (const p of profs) {
-        const pt = toNum(p.totalPagar) || p.sumMoney;
-        const total = pt + p.staffAmount + p.boxAmount + p.comision;
-        const ses = Math.round(toNum(p.totalSessions) || p.sumSessions);
-        gSes += ses; gPT += pt; gSt += p.staffAmount; gBx += p.boxAmount; gCo += p.comision; gTo += total;
-        html += '<tr><td>' + esc(p.nombre) + '</td><td class="num">' + ses + '</td><td class="num">' + fmt(pt) + '</td><td class="num">' + fmt(p.staffAmount) + '</td><td class="num">' + fmt(p.boxAmount) + '</td><td class="num">' + fmt(p.comision) + '</td><td class="num">' + fmt(total) + '</td></tr>';
+        const ptCorr = p.hasCorrecciones ? p.sumMoneyCorregido : p.sumMoney;
+        const sesPT = Math.round(p.sumSessions);
+        const staffHrs = p.staffHours || 0;
+        const staffPago = p.staffAmount || 0;
+        const boxHrs = p.boxAmount > 0 ? Math.round(p.boxAmount / STAFF_RATE) : 0;
+        const boxPago = p.boxAmount || 0;
+        const comision = p.comision || 0;
+        const total = ptCorr + staffPago + boxPago + comision;
+        summaryData.push({
+            profesor: p.nombre,
+            staffClases: staffHrs, staffPago,
+            boxClases: boxHrs, boxPago,
+            sesPT, ptPago: ptCorr,
+            comision, total
+        });
     }
-    html += '<tr class="total-row"><td>GRAN TOTAL</td><td class="num">' + gSes + '</td><td class="num">' + fmt(gPT) + '</td><td class="num">' + fmt(gSt) + '</td><td class="num">' + fmt(gBx) + '</td><td class="num">' + fmt(gCo) + '</td><td class="num">' + fmt(gTo) + '</td></tr>';
+    // Store for export
+    window._summaryData = summaryData;
+    window._mesAnio = mesName + ' ' + anio;
+
+    html += '<div class="section"><div class="section-title">Resumen de Sueldos por Profesor</div>';
+    html += '<div class="summary-table"><table><thead><tr>';
+    html += '<th>Profesor</th>';
+    html += '<th class="num">Cls Staff</th><th class="num">Pago Staff</th>';
+    html += '<th class="num">Cls Otras</th><th class="num">Pago Otras</th>';
+    html += '<th class="num">Cls PT</th><th class="num">Pago PT</th>';
+    html += '<th class="num">Comision</th>';
+    html += '<th class="num">Total a Pagar</th>';
+    html += '</tr></thead><tbody>';
+    let gStH=0,gStP=0,gBxH=0,gBxP=0,gPTs=0,gPTp=0,gCo=0,gTo=0;
+    for (const r of summaryData) {
+        gStH+=r.staffClases; gStP+=r.staffPago; gBxH+=r.boxClases; gBxP+=r.boxPago;
+        gPTs+=r.sesPT; gPTp+=r.ptPago; gCo+=r.comision; gTo+=r.total;
+        html += '<tr>';
+        html += '<td>' + esc(r.profesor) + '</td>';
+        html += '<td class="num">' + (r.staffClases || '-') + '</td><td class="num">' + fmt(r.staffPago) + '</td>';
+        html += '<td class="num">' + (r.boxClases || '-') + '</td><td class="num">' + fmt(r.boxPago) + '</td>';
+        html += '<td class="num">' + r.sesPT + '</td><td class="num">' + fmt(r.ptPago) + '</td>';
+        html += '<td class="num">' + fmt(r.comision) + '</td>';
+        html += '<td class="num" style="font-weight:600">' + fmt(r.total) + '</td>';
+        html += '</tr>';
+    }
+    html += '<tr class="total-row">';
+    html += '<td>GRAN TOTAL</td>';
+    html += '<td class="num">' + gStH + '</td><td class="num">' + fmt(gStP) + '</td>';
+    html += '<td class="num">' + gBxH + '</td><td class="num">' + fmt(gBxP) + '</td>';
+    html += '<td class="num">' + gPTs + '</td><td class="num">' + fmt(gPTp) + '</td>';
+    html += '<td class="num">' + fmt(gCo) + '</td>';
+    html += '<td class="num">' + fmt(gTo) + '</td>';
+    html += '</tr>';
     html += '</tbody></table></div></div>';
 
     // Error summary
@@ -1235,8 +1276,11 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
     }
     html += '</div></div>';
 
-    // Print button
-    html += '<div class="no-print" style="text-align:center;margin-top:24px"><button class="analyze-btn" onclick="window.print()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border)">Exportar PDF (Imprimir)</button></div>';
+    // Export buttons
+    html += '<div class="no-print" style="display:flex;justify-content:center;gap:16px;margin-top:24px;flex-wrap:wrap">';
+    html += '<button class="analyze-btn" onclick="exportExcel()" style="background:var(--ok);color:#000">Exportar Sueldos (.xlsx)</button>';
+    html += '<button class="analyze-btn" onclick="window.print()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border)">Exportar PDF (Imprimir)</button>';
+    html += '</div>';
 
     document.getElementById('results').innerHTML = html;
 
@@ -1288,6 +1332,97 @@ function esc(s) {
 
 function toggleAcc(idx) {
     document.getElementById('acc-' + idx).classList.toggle('open');
+}
+
+// ============================================================
+// EXPORT EXCEL
+// ============================================================
+function exportExcel() {
+    const data = window._summaryData;
+    const periodo = window._mesAnio;
+    if (!data || !data.length) { alert('No hay datos para exportar'); return; }
+
+    // Header row
+    const headers = [
+        'Profesor',
+        'Clases Staff', 'Pago Staff',
+        'Clases Otras', 'Pago Otras',
+        'Clases PT', 'Pago PT',
+        'Comision',
+        'Total a Pagar'
+    ];
+
+    // Data rows
+    const rows = data.map(r => [
+        r.profesor,
+        r.staffClases, r.staffPago,
+        r.boxClases, r.boxPago,
+        r.sesPT, r.ptPago,
+        r.comision, r.total
+    ]);
+
+    // Totals row
+    const totals = [
+        'TOTAL',
+        data.reduce((a, r) => a + r.staffClases, 0),
+        data.reduce((a, r) => a + r.staffPago, 0),
+        data.reduce((a, r) => a + r.boxClases, 0),
+        data.reduce((a, r) => a + r.boxPago, 0),
+        data.reduce((a, r) => a + r.sesPT, 0),
+        data.reduce((a, r) => a + r.ptPago, 0),
+        data.reduce((a, r) => a + r.comision, 0),
+        data.reduce((a, r) => a + r.total, 0)
+    ];
+
+    // Build sheet data
+    const wsData = [
+        ['ONNE - Sueldos ' + periodo],
+        ['Valores corregidos - Generado ' + new Date().toLocaleDateString('es-CL')],
+        [],
+        headers,
+        ...rows,
+        [],
+        totals
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Column widths
+    ws['!cols'] = [
+        {wch: 25}, // Profesor
+        {wch: 12}, {wch: 14}, // Staff
+        {wch: 12}, {wch: 14}, // Otras
+        {wch: 12}, {wch: 14}, // PT
+        {wch: 14}, // Comision
+        {wch: 16}  // Total
+    ];
+
+    // Merge title row
+    ws['!merges'] = [
+        {s:{r:0,c:0}, e:{r:0,c:8}},
+        {s:{r:1,c:0}, e:{r:1,c:8}}
+    ];
+
+    // Format money columns as numbers
+    const moneyFormat = '#,##0';
+    const dataStart = 4; // row index where data starts (0-indexed)
+    const moneyCols = [2, 4, 6, 7, 8]; // Pago Staff, Pago Otras, Pago PT, Comision, Total
+    for (let ri = dataStart; ri < dataStart + rows.length; ri++) {
+        for (const ci of moneyCols) {
+            const addr = XLSX.utils.encode_cell({r: ri, c: ci});
+            if (ws[addr]) ws[addr].z = moneyFormat;
+        }
+    }
+    // Totals row formatting
+    const totalsRow = dataStart + rows.length + 1;
+    for (const ci of moneyCols) {
+        const addr = XLSX.utils.encode_cell({r: totalsRow, c: ci});
+        if (ws[addr]) ws[addr].z = moneyFormat;
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sueldos');
+    XLSX.writeFile(wb, 'Sueldos_' + periodo.replace(/\s+/g, '_') + '.xlsx');
 }
 </script>
 </body>
