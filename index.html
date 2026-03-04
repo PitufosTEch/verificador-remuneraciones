@@ -800,31 +800,59 @@ function buildStudentDetail(prof, ebStudents) {
 // ============================================================
 // ENRICH FROM EBRAIN - fill missing plans
 // ============================================================
+function normName(n) {
+    return up(n).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function findPlanInEbrain(studentName, profPlans, allEbPlans) {
+    const sNorm = normName(studentName);
+    const sParts = sNorm.split(' ').filter(p => p.length >= 3);
+
+    // Search function: try exact, then fuzzy within a plan dict
+    function searchIn(plans) {
+        if (!plans) return null;
+        // Exact normalized match
+        for (const [eName, plan] of Object.entries(plans)) {
+            if (normName(eName) === sNorm) return plan;
+        }
+        // Fuzzy: at least 1 part matches (substring check)
+        for (const [eName, plan] of Object.entries(plans)) {
+            const eParts = normName(eName).split(' ').filter(p => p.length >= 3);
+            const score = sParts.reduce((c, sp) => c + (eParts.some(ep => ep.includes(sp) || sp.includes(ep) || (sp.length >= 4 && ep.length >= 4 && sp.substring(0,4) === ep.substring(0,4))) ? 1 : 0), 0);
+            if (score >= 1) return plan;
+        }
+        return null;
+    }
+
+    // 1. Search within matched professor
+    let found = searchIn(profPlans);
+    if (found) return found;
+
+    // 2. Fallback: search across ALL professors in Ebrain
+    if (allEbPlans) {
+        for (const [profKey, plans] of Object.entries(allEbPlans)) {
+            if (plans === profPlans) continue; // already searched
+            found = searchIn(plans);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
 function enrichFromEbrain(profesores, ebrainResult) {
     if (!ebrainResult || !ebrainResult.ebPlans) return;
     const { ebPlans, findEbProf } = ebrainResult;
 
     for (const prof of profesores) {
         const ebKey = findEbProf(prof.nombre);
-        if (!ebKey || !ebPlans[ebKey]) continue;
-        const profPlans = ebPlans[ebKey];
+        const profPlans = (ebKey && ebPlans[ebKey]) ? ebPlans[ebKey] : null;
 
         for (const s of prof.students) {
             if (s.sessions <= 0 || s.isCong || s.isVac) continue;
-            // Only enrich if no plan detected from Excel
+            // Only enrich if no plan detected from Excel or no price
             if (s.planSes !== null && s.valor > 0 && s.valorCorregido === null) continue;
 
-            // Try to find student in Ebrain plans
-            const sName = up(s.nombre);
-            let ebPlan = null;
-            // Exact match
-            if (profPlans[sName]) { ebPlan = profPlans[sName]; }
-            else {
-                // Fuzzy match
-                for (const [eName, plan] of Object.entries(profPlans)) {
-                    if (matchNames(sName, eName) >= 1) { ebPlan = plan; break; }
-                }
-            }
+            const ebPlan = findPlanInEbrain(s.nombre, profPlans, ebPlans);
             if (!ebPlan) continue;
 
             const ebPlanSes = parsePlan(ebPlan);
@@ -837,17 +865,17 @@ function enrichFromEbrain(profesores, ebrainResult) {
                 const exp = expectedPrice(ebPlanSes, s.isDuo, s.isTrio);
                 if (exp) {
                     if (s.valor === 0) {
-                        // No price assigned
                         s.valorCorregido = exp;
                         s.totalCorregido = Math.round(s.sessions * exp);
                         s.errors = s.errors.filter(e => !e.includes('Sin precio'));
                         s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
                     } else if (s.valor !== exp) {
-                        // Has price but no plan, price might be wrong
                         s.valorCorregido = exp;
                         s.totalCorregido = Math.round(s.sessions * exp);
                         s.errors = s.errors.filter(e => !e.includes('VALOR:'));
-                        s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' corregido ' + fmt(exp));
+                        s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
+                    } else {
+                        // Price matches, just show the plan found
                     }
                 }
             }
