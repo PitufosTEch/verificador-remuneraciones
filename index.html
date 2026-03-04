@@ -162,11 +162,34 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
 .error-summary .count.zero { color:var(--ok); }
 .error-summary .count.nonzero { color:var(--err); }
 
+/* Save/Approve */
+.save-bar { display:flex; justify-content:center; gap:16px; margin-top:32px; flex-wrap:wrap; padding:24px; background:var(--bg2); border:2px solid var(--gold3); border-radius:var(--r); }
+.save-btn { padding:14px 40px; background:var(--ok); color:#000; font-size:16px; font-weight:700; border-radius:var(--rs); transition:.2s; letter-spacing:1px; }
+.save-btn:hover { background:#2ecc71; transform:translateY(-1px); }
+.save-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+.save-bar-text { width:100%; text-align:center; font-size:13px; color:var(--text2); margin-bottom:8px; }
+
+/* Saved reviews */
+.saved-section { margin-top:32px; }
+.saved-card { display:flex; justify-content:space-between; align-items:center; background:var(--bg2); border:1px solid var(--border); border-radius:var(--rs); padding:14px 20px; margin-bottom:8px; transition:.2s; }
+.saved-card:hover { border-color:var(--border2); }
+.saved-info { display:flex; flex-direction:column; gap:2px; }
+.saved-period { font-weight:600; font-size:15px; }
+.saved-date { font-size:12px; color:var(--text3); }
+.saved-actions { display:flex; gap:8px; }
+.saved-dl { padding:6px 14px; font-size:12px; border-radius:var(--rs); transition:.2s; font-weight:500; }
+.saved-dl.excel { background:rgba(52,199,89,.15); color:var(--ok); border:1px solid rgba(52,199,89,.2); }
+.saved-dl.excel:hover { background:rgba(52,199,89,.25); }
+.saved-dl.pdf { background:rgba(201,168,76,.15); color:var(--gold); border:1px solid rgba(201,168,76,.2); }
+.saved-dl.pdf:hover { background:rgba(201,168,76,.25); }
+.saved-dl.del { background:rgba(255,59,48,.1); color:var(--err); border:1px solid rgba(255,59,48,.15); }
+.saved-dl.del:hover { background:rgba(255,59,48,.2); }
+
 /* Print */
 @media print {
     :root { --bg:#fff; --bg2:#fff; --bg3:#f5f5f5; --bg4:#eee; --border:#ddd; --border2:#ccc; --text:#111; --text2:#555; --text3:#888; --gold:#8a6d1b; }
     body { background:#fff; color:#111; font-size:11px; }
-    header,.controls,.dropzone,.analyze-btn,.progress,.logout-btn,.acc-arrow,.no-print { display:none!important; }
+    header,.controls,.dropzone,.analyze-btn,.progress,.logout-btn,.acc-arrow,.no-print,.save-bar,.saved-section { display:none!important; }
     .acc-body { display:block!important; }
     .acc { break-inside:avoid; border:1px solid #ddd; margin-bottom:12px; }
     .card { border:1px solid #ddd; }
@@ -234,6 +257,10 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
         <div class="progress-text" id="progress-text">Preparando...</div>
     </div>
     <div id="results"></div>
+    <div id="saved-reviews" class="saved-section no-print" style="display:none">
+        <div class="section-title">Revisiones Guardadas</div>
+        <div id="saved-list"></div>
+    </div>
 </main>
 </div>
 
@@ -1294,6 +1321,12 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
     html += '<button class="analyze-btn" onclick="window.print()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border)">Exportar PDF (Imprimir)</button>';
     html += '</div>';
 
+    // Save/Approve bar
+    html += '<div class="save-bar no-print">';
+    html += '<div class="save-bar-text">Si la revision de <b>' + mesName + ' ' + anio + '</b> esta correcta, guarda el Excel y PDF para respaldo</div>';
+    html += '<button class="save-btn" id="save-btn" onclick="guardarRevision()">GUARDAR REVISION APROBADA</button>';
+    html += '</div>';
+
     document.getElementById('results').innerHTML = html;
 
     // Bind CSV upload if needed
@@ -1436,6 +1469,218 @@ function exportExcel() {
     XLSX.utils.book_append_sheet(wb, ws, 'Sueldos');
     XLSX.writeFile(wb, 'Sueldos_' + periodo.replace(/\s+/g, '_') + '.xlsx');
 }
+
+// ============================================================
+// BUILD EXCEL BLOB (for saving without downloading)
+// ============================================================
+function buildExcelBlob() {
+    const data = window._summaryData;
+    const periodo = window._mesAnio;
+    if (!data || !data.length) return null;
+
+    const headers = ['Profesor','Clases Staff','Pago Staff','Clases Otras','Pago Otras','Clases PT','Pago PT','Comision','Total a Pagar'];
+    const rows = data.map(r => [r.profesor, r.staffClases, r.staffPago, r.boxClases, r.boxPago, r.sesPT, r.ptPago, r.comision, r.total]);
+    const totals = ['TOTAL', data.reduce((a,r)=>a+r.staffClases,0), data.reduce((a,r)=>a+r.staffPago,0), data.reduce((a,r)=>a+r.boxClases,0), data.reduce((a,r)=>a+r.boxPago,0), data.reduce((a,r)=>a+r.sesPT,0), data.reduce((a,r)=>a+r.ptPago,0), data.reduce((a,r)=>a+r.comision,0), data.reduce((a,r)=>a+r.total,0)];
+    const wsData = [['ONNE - Sueldos ' + periodo], ['Valores corregidos - Generado ' + new Date().toLocaleDateString('es-CL')], [], headers, ...rows, [], totals];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws['!cols'] = [{wch:25},{wch:12},{wch:14},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:16}];
+    ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:8}},{s:{r:1,c:0},e:{r:1,c:8}}];
+    const moneyFormat = '#,##0';
+    const dataStart = 4;
+    const moneyCols = [2,4,6,7,8];
+    for (let ri = dataStart; ri < dataStart + rows.length; ri++) {
+        for (const ci of moneyCols) {
+            const addr = XLSX.utils.encode_cell({r:ri,c:ci});
+            if (ws[addr]) ws[addr].z = moneyFormat;
+        }
+    }
+    const totalsRow = dataStart + rows.length + 1;
+    for (const ci of moneyCols) {
+        const addr = XLSX.utils.encode_cell({r:totalsRow,c:ci});
+        if (ws[addr]) ws[addr].z = moneyFormat;
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sueldos');
+    const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    return new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+// ============================================================
+// BUILD PDF-READY HTML SNAPSHOT
+// ============================================================
+function buildHtmlSnapshot() {
+    const resultsEl = document.getElementById('results');
+    if (!resultsEl) return null;
+    const periodo = window._mesAnio || '';
+    // Clone results without no-print elements
+    const clone = resultsEl.cloneNode(true);
+    clone.querySelectorAll('.no-print, .save-bar').forEach(el => el.remove());
+    // Expand all accordions
+    clone.querySelectorAll('.acc').forEach(a => a.classList.add('open'));
+    clone.querySelectorAll('.acc-body').forEach(b => b.style.display = 'block');
+    // Build standalone HTML
+    return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>ONNE - Revision ' + esc(periodo) + '</title>' +
+        '<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">' +
+        '<style>' + document.querySelector('style').textContent.replace(/@media print\s*\{[^}]*\{[^}]*\}[^}]*\}/g, '') + '</style>' +
+        '</head><body style="background:#080808;color:#e8e8e8;font-family:Jost,sans-serif;padding:32px;max-width:1100px;margin:0 auto">' +
+        '<div style="text-align:center;margin-bottom:24px"><div style="font-size:14px;letter-spacing:5px;color:#c9a84c">ONNE</div>' +
+        '<div style="font-size:20px;font-weight:300;color:#aaa">Revision Aprobada - ' + esc(periodo) + '</div>' +
+        '<div style="font-size:12px;color:#666;margin-top:4px">Generado: ' + new Date().toLocaleString('es-CL') + '</div></div>' +
+        clone.innerHTML + '</body></html>';
+}
+
+// ============================================================
+// INDEXEDDB - PERSISTENT STORAGE
+// ============================================================
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open('OnneRevisiones', 1);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('revisiones')) {
+                db.createObjectStore('revisiones', { keyPath: 'id', autoIncrement: true });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveRevision(periodo, excelBlob, htmlStr) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('revisiones', 'readwrite');
+        tx.objectStore('revisiones').add({
+            periodo,
+            fecha: new Date().toISOString(),
+            excel: excelBlob,
+            html: htmlStr
+        });
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+}
+
+async function getAllRevisiones() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('revisiones', 'readonly');
+        const req = tx.objectStore('revisiones').getAll();
+        req.onsuccess = () => { db.close(); resolve(req.result); };
+        req.onerror = () => { db.close(); reject(req.error); };
+    });
+}
+
+async function deleteRevision(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('revisiones', 'readwrite');
+        tx.objectStore('revisiones').delete(id);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+}
+
+// ============================================================
+// GUARDAR REVISION
+// ============================================================
+async function guardarRevision() {
+    const btn = document.getElementById('save-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+
+    try {
+        const periodo = window._mesAnio || 'Sin periodo';
+        const excelBlob = buildExcelBlob();
+        const htmlStr = buildHtmlSnapshot();
+
+        if (!excelBlob) { alert('No hay datos para guardar'); btn.disabled = false; btn.textContent = 'GUARDAR REVISION APROBADA'; return; }
+
+        await saveRevision(periodo, excelBlob, htmlStr);
+
+        btn.textContent = 'GUARDADO';
+        btn.style.background = 'var(--gold)';
+        setTimeout(() => {
+            btn.textContent = 'GUARDAR REVISION APROBADA';
+            btn.style.background = '';
+            btn.disabled = false;
+        }, 2000);
+
+        await renderSavedReviews();
+    } catch (err) {
+        console.error('Error al guardar:', err);
+        alert('Error al guardar: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'GUARDAR REVISION APROBADA';
+    }
+}
+
+// ============================================================
+// RENDER SAVED REVIEWS
+// ============================================================
+async function renderSavedReviews() {
+    try {
+        const revs = await getAllRevisiones();
+        const container = document.getElementById('saved-reviews');
+        const list = document.getElementById('saved-list');
+        if (!revs.length) { container.style.display = 'none'; return; }
+
+        container.style.display = 'block';
+        list.innerHTML = '';
+        for (const rev of revs.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))) {
+            const fecha = new Date(rev.fecha).toLocaleString('es-CL');
+            const div = document.createElement('div');
+            div.className = 'saved-card';
+            div.innerHTML = '<div class="saved-info"><div class="saved-period">' + esc(rev.periodo) + '</div><div class="saved-date">Guardado: ' + fecha + '</div></div>' +
+                '<div class="saved-actions">' +
+                '<button class="saved-dl excel" onclick="downloadSavedExcel(' + rev.id + ')">Excel</button>' +
+                '<button class="saved-dl pdf" onclick="downloadSavedPDF(' + rev.id + ')">PDF/HTML</button>' +
+                '<button class="saved-dl del" onclick="deleteSaved(' + rev.id + ')">Borrar</button>' +
+                '</div>';
+            list.appendChild(div);
+        }
+    } catch (e) { console.error('Error cargando revisiones:', e); }
+}
+
+async function downloadSavedExcel(id) {
+    const revs = await getAllRevisiones();
+    const rev = revs.find(r => r.id === id);
+    if (!rev || !rev.excel) { alert('No se encontro el archivo Excel'); return; }
+    const url = URL.createObjectURL(rev.excel);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Sueldos_' + rev.periodo.replace(/\s+/g, '_') + '.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function downloadSavedPDF(id) {
+    const revs = await getAllRevisiones();
+    const rev = revs.find(r => r.id === id);
+    if (!rev || !rev.html) { alert('No se encontro el archivo'); return; }
+    const blob = new Blob([rev.html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    // Open in new tab for printing to PDF
+    const win = window.open(url, '_blank');
+    if (win) {
+        win.onload = () => { URL.revokeObjectURL(url); };
+    }
+}
+
+async function deleteSaved(id) {
+    if (!confirm('Eliminar esta revision guardada?')) return;
+    await deleteRevision(id);
+    await renderSavedReviews();
+}
+
+// Load saved reviews on login
+const origDoLogin = doLogin;
+doLogin = function() {
+    origDoLogin();
+    if (!document.getElementById('login').classList.contains('hidden')) return;
+    renderSavedReviews();
+};
 </script>
 </body>
 </html>
