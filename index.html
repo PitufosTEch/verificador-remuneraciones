@@ -99,6 +99,24 @@ main { max-width:1100px; margin:0 auto; padding:32px 24px 80px; }
 .acc.open .acc-body { display:block; animation:fadeIn .3s; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
 
+/* Accordion sections */
+.acc-block { margin-bottom:16px; padding:14px; background:var(--bg); border-radius:var(--rs); border:1px solid var(--border); }
+.acc-block-title { font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--text3); margin-bottom:10px; font-weight:500; }
+.acc-block-title.admin { color:var(--text2); }
+.acc-block-title.ebrain { color:cornflowerblue; }
+.acc-block-title.resumen { color:var(--gold); }
+.acc-block-stats { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:10px; font-size:14px; }
+.acc-block-stats .stat-lbl { font-size:11px; color:var(--text3); text-transform:uppercase; }
+.acc-block-stats .stat-val { font-weight:600; font-size:16px; }
+.acc-block-stats .stat-val.ok { color:var(--ok); }
+.acc-block-stats .stat-val.err { color:var(--err); }
+.resumen-line { display:flex; justify-content:space-between; padding:6px 0; font-size:14px; border-bottom:1px solid var(--border); }
+.resumen-line:last-child { border-bottom:none; }
+.resumen-line.total { font-weight:700; font-size:16px; padding-top:10px; border-top:2px solid var(--gold3); border-bottom:none; }
+.resumen-line .rl-label { color:var(--text2); }
+.resumen-line .rl-value { font-weight:600; font-variant-numeric:tabular-nums; }
+.resumen-line.total .rl-value { color:var(--gold); }
+
 /* Info grid */
 .info-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:16px; padding:12px; background:var(--bg); border-radius:var(--rs); }
 .info-item { font-size:13px; }
@@ -877,19 +895,19 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
 
         html += '<div class="acc-body">';
 
-        // Info grid
-        html += '<div class="info-grid">';
-        html += infoItem('Sesiones reportadas', p.totalSessions !== null ? Math.round(toNum(p.totalSessions)) : '-', Math.round(p.sumSessions) === Math.round(toNum(p.totalSessions)) ? 'ok' : (p.totalSessions !== null ? 'err' : ''));
-        html += infoItem('PT reportado', p.totalPagar !== null ? fmt(p.totalPagar) : '-', Math.round(p.sumMoney) === Math.round(toNum(p.totalPagar)) ? 'ok' : (p.totalPagar !== null ? 'err' : ''));
-        if (p.hasCorrecciones) html += infoItem('PT corregido', fmt(p.sumMoneyCorregido), 'ok');
-        if (p.staffAmount > 0) html += infoItem('Staff', p.staffHours + 'h = ' + fmt(p.staffAmount), '');
-        if (p.boxAmount > 0) html += infoItem('Box', fmt(p.boxAmount), '');
-        if (p.comision > 0) html += infoItem('Comision', fmt(p.comision), '');
-        if (p.totalAPagarReported !== null) {
-            const ok2 = Math.round(p.totalComputed) === Math.round(toNum(p.totalAPagarReported));
-            html += infoItem('Total a Pagar', fmt(p.totalAPagarReported), ok2 ? 'ok' : 'err');
+        // Find Ebrain data for this professor
+        let ec = null;
+        if (ebrainResult && ebrainResult.comparison) {
+            ec = ebrainResult.comparison.find(c => c.profName === p.nombre);
         }
-        if (p.hasCorrecciones) html += infoItem('Total corregido', fmt(p.totalComputedCorregido), 'ok');
+
+        // ── BLOCK 1: CALCULADO ADMINISTRACION ──
+        html += '<div class="acc-block">';
+        html += '<div class="acc-block-title admin">CALCULADO ADMINISTRACION</div>';
+        html += '<div class="acc-block-stats">';
+        html += '<div><div class="stat-lbl">Sesiones</div><div class="stat-val">' + Math.round(p.sumSessions) + '</div></div>';
+        html += '<div><div class="stat-lbl">Clases PT</div><div class="stat-val">' + fmt(p.sumMoney) + '</div></div>';
+        html += '<div><div class="stat-lbl">Alumnos activos</div><div class="stat-val">' + p.activeCount + '</div></div>';
         html += '</div>';
 
         // Students table
@@ -926,40 +944,66 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
             }
         }
         html += '</tbody></table>';
+        html += '</div>'; // end block admin
 
-        // Ebrain comparison inline for this professor
-        if (ebrainResult && ebrainResult.comparison) {
-            const ec = ebrainResult.comparison.find(c => c.profName === p.nombre);
-            if (ec && ec.status !== 'OK') {
-                html += '<div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:var(--rs);border:1px solid var(--border)">';
-                html += '<div style="font-size:12px;color:var(--text2);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Comparacion Ebrain</div>';
-                if (ec.status === 'NO MATCH') {
-                    html += '<div style="font-size:13px;color:var(--warn)">No se encontro match en Ebrain para este profesor.</div>';
-                } else {
-                    html += '<div style="font-size:13px;margin-bottom:8px">Admin: <b>' + ec.adminSes + '</b> ses &middot; Ebrain: <b>' + ec.ebrainSes + '</b> ses &middot; Diferencia: <b style="color:var(--err)">' + (ec.diff > 0 ? '+' : '') + ec.diff + '</b></div>';
-                    if (ec.detail && ec.detail.length) {
-                        // Only show students with differences
-                        const diffs = ec.detail.filter(d => d.status !== 'OK');
-                        if (diffs.length) {
-                            html += '<table style="font-size:12px"><thead><tr><th>Alumno</th><th class="num">Admin</th><th class="num">Ebrain</th><th class="num">Dif</th><th></th></tr></thead><tbody>';
-                            for (const d of diffs) {
-                                html += '<tr class="err-row">';
-                                html += '<td>' + esc(d.alumno) + '</td>';
-                                html += '<td class="num">' + (d.adminSes !== null ? d.adminSes : '-') + '</td>';
-                                html += '<td class="num">' + (d.ebrainSes !== null ? d.ebrainSes : '-') + '</td>';
-                                html += '<td class="num">' + (d.diff !== null ? (d.diff > 0 ? '+' : '') + d.diff : '-') + '</td>';
-                                html += '<td>' + statusTag(d.status) + '</td>';
-                                html += '</tr>';
-                            }
-                            html += '</tbody></table>';
-                        }
+        // ── BLOCK 2: CALCULADO EBRAIN ──
+        html += '<div class="acc-block">';
+        html += '<div class="acc-block-title ebrain">CALCULADO EBRAIN</div>';
+        if (!ec) {
+            html += '<div style="font-size:13px;color:var(--text3)">Sin datos de Ebrain disponibles</div>';
+        } else if (ec.status === 'NO MATCH') {
+            html += '<div style="font-size:13px;color:var(--warn)">No se encontro match en Ebrain para este profesor</div>';
+        } else {
+            const sesOk = ec.diff === 0;
+            html += '<div class="acc-block-stats">';
+            html += '<div><div class="stat-lbl">Sesiones Ebrain</div><div class="stat-val' + (sesOk ? ' ok' : ' err') + '">' + ec.ebrainSes + '</div></div>';
+            html += '<div><div class="stat-lbl">Sesiones Admin</div><div class="stat-val">' + ec.adminSes + '</div></div>';
+            html += '<div><div class="stat-lbl">Diferencia</div><div class="stat-val' + (sesOk ? ' ok' : ' err') + '">' + (sesOk ? 'OK' : (ec.diff > 0 ? '+' : '') + ec.diff) + '</div></div>';
+            html += '</div>';
+            if (ec.detail && ec.detail.length) {
+                const diffs = ec.detail.filter(d => d.status !== 'OK');
+                if (diffs.length) {
+                    html += '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Alumnos con diferencia:</div>';
+                    html += '<table style="font-size:12px"><thead><tr><th>Alumno</th><th class="num">Admin</th><th class="num">Ebrain</th><th class="num">Dif</th><th></th></tr></thead><tbody>';
+                    for (const d of diffs) {
+                        html += '<tr class="err-row">';
+                        html += '<td>' + esc(d.alumno) + '</td>';
+                        html += '<td class="num">' + (d.adminSes !== null ? d.adminSes : '-') + '</td>';
+                        html += '<td class="num">' + (d.ebrainSes !== null ? d.ebrainSes : '-') + '</td>';
+                        html += '<td class="num">' + (d.diff !== null ? (d.diff > 0 ? '+' : '') + d.diff : '-') + '</td>';
+                        html += '<td>' + statusTag(d.status) + '</td>';
+                        html += '</tr>';
                     }
+                    html += '</tbody></table>';
                 }
-                html += '</div>';
-            } else if (ec && ec.status === 'OK') {
-                html += '<div style="margin-top:8px;font-size:12px;color:var(--ok)">Ebrain: OK (' + ec.ebrainSes + ' sesiones coinciden)</div>';
             }
         }
+        html += '</div>'; // end block ebrain
+
+        // ── BLOCK 3: RESUMEN / TOTAL A PAGAR ──
+        html += '<div class="acc-block">';
+        html += '<div class="acc-block-title resumen">RESUMEN - TOTAL A PAGAR</div>';
+
+        const ptCorregido = p.hasCorrecciones ? p.sumMoneyCorregido : p.sumMoney;
+        const totalFinal = ptCorregido + p.staffAmount + p.boxAmount + p.comision;
+
+        html += '<div class="resumen-line"><span class="rl-label">Clases PT' + (p.hasCorrecciones ? ' (corregido)' : '') + '</span><span class="rl-value">' + fmt(ptCorregido) + '</span></div>';
+        if (p.hasCorrecciones) {
+            html += '<div class="resumen-line" style="font-size:12px;color:var(--text3)"><span class="rl-label">PT original (Admin)</span><span class="rl-value" style="text-decoration:line-through">' + fmt(p.sumMoney) + '</span></div>';
+        }
+        if (p.staffAmount > 0) html += '<div class="resumen-line"><span class="rl-label">+ Staff (' + p.staffHours + 'h x ' + fmt(STAFF_RATE) + ')</span><span class="rl-value">' + fmt(p.staffAmount) + '</span></div>';
+        if (p.boxAmount > 0) html += '<div class="resumen-line"><span class="rl-label">+ Box</span><span class="rl-value">' + fmt(p.boxAmount) + '</span></div>';
+        if (p.comision > 0) html += '<div class="resumen-line"><span class="rl-label">+ Comision</span><span class="rl-value">' + fmt(p.comision) + '</span></div>';
+        html += '<div class="resumen-line total"><span class="rl-label">TOTAL A PAGAR</span><span class="rl-value">' + fmt(totalFinal) + '</span></div>';
+
+        if (p.totalAPagarReported !== null) {
+            const repOk = Math.round(totalFinal) === Math.round(toNum(p.totalAPagarReported));
+            if (!repOk) {
+                html += '<div style="font-size:12px;margin-top:8px;color:var(--err)">Reportado en Excel: ' + fmt(p.totalAPagarReported) + ' (diferencia: ' + fmt(totalFinal - toNum(p.totalAPagarReported)) + ')</div>';
+            }
+        }
+
+        html += '</div>'; // end block resumen
 
         // Professor-level errors
         if (p.errors.length) {
