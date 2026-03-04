@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ONNE - Verificador de Remuneraciones</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+    --bg: #080808; --bg2: #121212; --bg3: #1a1a1a; --bg4: #222;
+    --border: #2a2a2a; --border2: #333;
+    --text: #e8e8e8; --text2: #aaa; --text3: #666;
+    --gold: #c9a84c; --gold2: #dbb85c; --gold3: #a8883a;
+    --ok: #34c759; --err: #ff3b30; --warn: #ffcc00;
+    --r: 12px; --rs: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Jost',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:var(--bg2); } ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+button { font-family:inherit; cursor:pointer; border:none; }
+input,select { font-family:inherit; }
+
+/* Login */
+#login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:100; }
+#login.hidden { display:none; }
+.login-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:48px 40px; width:380px; text-align:center; }
+.login-brand { font-size:14px; letter-spacing:6px; color:var(--gold); margin-bottom:8px; font-weight:300; }
+.login-title { font-size:22px; font-weight:300; color:var(--text2); margin-bottom:36px; }
+.login-input { width:100%; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:var(--rs); color:var(--text); font-size:15px; margin-bottom:16px; outline:none; transition:.2s; text-align:center; letter-spacing:2px; }
+.login-input:focus { border-color:var(--gold3); }
+.login-btn { width:100%; padding:14px; background:var(--gold); color:#000; font-size:15px; font-weight:600; border-radius:var(--rs); transition:.2s; letter-spacing:1px; }
+.login-btn:hover { background:var(--gold2); }
+.login-err { color:var(--err); font-size:13px; margin-top:12px; min-height:20px; }
+
+/* Header */
+header { background:var(--bg2); border-bottom:1px solid var(--border); padding:16px 32px; display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; z-index:50; }
+.logo { font-size:13px; letter-spacing:5px; color:var(--gold); font-weight:300; }
+.logo span { color:var(--text2); letter-spacing:1px; font-size:14px; margin-left:12px; }
+.logout-btn { background:none; color:var(--text3); font-size:13px; padding:8px 16px; border:1px solid var(--border); border-radius:var(--rs); transition:.2s; }
+.logout-btn:hover { color:var(--text); border-color:var(--border2); }
+
+/* Main */
+main { max-width:1100px; margin:0 auto; padding:32px 24px 80px; }
+#app { display:none; }
+
+/* Controls */
+.controls { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; margin-bottom:24px; }
+.field label { display:block; font-size:12px; color:var(--text2); margin-bottom:6px; letter-spacing:1px; text-transform:uppercase; }
+.field select { padding:10px 14px; background:var(--bg2); border:1px solid var(--border); color:var(--text); border-radius:var(--rs); font-size:14px; outline:none; }
+.field select:focus { border-color:var(--gold3); }
+
+/* Drop zone */
+.dropzone { border:2px dashed var(--border2); border-radius:var(--r); padding:32px; text-align:center; background:var(--bg2); cursor:pointer; transition:.3s; flex:1; min-width:280px; }
+.dropzone:hover,.dropzone.over { border-color:var(--gold3); background:var(--bg3); }
+.dropzone.loaded { border-color:var(--ok); border-style:solid; }
+.dropzone p { color:var(--text2); font-size:14px; }
+.dropzone .file-name { color:var(--gold); font-weight:500; margin-top:8px; font-size:15px; }
+
+.analyze-btn { padding:12px 32px; background:var(--gold); color:#000; font-size:15px; font-weight:600; border-radius:var(--rs); transition:.2s; letter-spacing:.5px; height:fit-content; }
+.analyze-btn:hover { background:var(--gold2); }
+.analyze-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* Progress */
+.progress { margin:24px 0; padding:20px; background:var(--bg2); border-radius:var(--r); border:1px solid var(--border); display:none; }
+.progress.show { display:block; }
+.progress-bar { height:4px; background:var(--bg); border-radius:2px; overflow:hidden; margin-bottom:12px; }
+.progress-fill { height:100%; background:var(--gold); width:0%; transition:width .4s; border-radius:2px; }
+.progress-text { font-size:13px; color:var(--text2); }
+
+/* Summary cards */
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:32px; }
+.card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:20px; }
+.card-label { font-size:12px; color:var(--text2); letter-spacing:1px; text-transform:uppercase; margin-bottom:8px; }
+.card-value { font-size:28px; font-weight:600; }
+.card-sub { font-size:12px; color:var(--text3); margin-top:4px; }
+.card-value.ok { color:var(--ok); }
+.card-value.err { color:var(--err); }
+
+/* Section */
+.section { margin-bottom:32px; }
+.section-title { font-size:16px; font-weight:500; color:var(--text2); margin-bottom:16px; letter-spacing:1px; text-transform:uppercase; padding-bottom:8px; border-bottom:1px solid var(--border); }
+
+/* Accordion */
+.acc { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); margin-bottom:8px; overflow:hidden; }
+.acc-head { padding:16px 20px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:.2s; }
+.acc-head:hover { background:var(--bg3); }
+.acc-left { display:flex; align-items:center; gap:12px; }
+.acc-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.acc-dot.ok { background:var(--ok); }
+.acc-dot.err { background:var(--err); }
+.acc-dot.warn { background:var(--warn); }
+.acc-name { font-weight:600; font-size:15px; }
+.acc-stats { font-size:13px; color:var(--text2); }
+.acc-badge { background:var(--err); color:#fff; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; }
+.acc-arrow { color:var(--text3); font-size:18px; transition:.3s; }
+.acc.open .acc-arrow { transform:rotate(180deg); }
+.acc-body { display:none; padding:0 20px 20px; }
+.acc.open .acc-body { display:block; animation:fadeIn .3s; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+
+/* Info grid */
+.info-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:16px; padding:12px; background:var(--bg); border-radius:var(--rs); }
+.info-item { font-size:13px; }
+.info-item .lbl { color:var(--text3); font-size:11px; text-transform:uppercase; }
+.info-item .val { font-weight:500; }
+.info-item .val.ok { color:var(--ok); }
+.info-item .val.err { color:var(--err); }
+
+/* Tables */
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; color:var(--text2); font-weight:500; font-size:11px; letter-spacing:.5px; text-transform:uppercase; padding:8px 10px; border-bottom:1px solid var(--border); }
+td { padding:8px 10px; border-bottom:1px solid var(--border); }
+tr:last-child td { border-bottom:none; }
+tr.err-row { background:rgba(255,59,48,.08); }
+td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.tag { display:inline-block; font-size:10px; padding:1px 6px; border-radius:4px; font-weight:600; letter-spacing:.5px; }
+.tag-duo { background:rgba(201,168,76,.2); color:var(--gold); }
+.tag-trio { background:rgba(201,168,76,.3); color:var(--gold2); }
+.tag-cong { background:rgba(255,204,0,.15); color:var(--warn); }
+.tag-reemp { background:rgba(100,149,237,.15); color:cornflowerblue; }
+
+/* Error list inside accordion */
+.err-list { margin-top:12px; padding:12px; background:rgba(255,59,48,.06); border-radius:var(--rs); border:1px solid rgba(255,59,48,.15); }
+.err-list-item { font-size:13px; color:var(--err); padding:4px 0; }
+.err-list-item::before { content:''; display:inline-block; width:6px; height:6px; background:var(--err); border-radius:50%; margin-right:8px; vertical-align:middle; }
+
+/* Ebrain section */
+.eb-status { padding:12px 16px; border-radius:var(--rs); margin-bottom:16px; font-size:14px; }
+.eb-status.loading { background:rgba(201,168,76,.1); color:var(--gold); border:1px solid rgba(201,168,76,.2); }
+.eb-status.success { background:rgba(52,199,89,.1); color:var(--ok); border:1px solid rgba(52,199,89,.2); }
+.eb-status.error { background:rgba(255,59,48,.1); color:var(--err); border:1px solid rgba(255,59,48,.2); }
+
+/* Summary table */
+.summary-table { background:var(--bg2); border-radius:var(--r); border:1px solid var(--border); overflow:hidden; }
+.summary-table table { margin:0; }
+.summary-table th { background:var(--bg3); }
+.summary-table tr.total-row { background:var(--bg3); font-weight:600; }
+.summary-table tr.total-row td { border-top:2px solid var(--gold3); }
+
+/* Error summary */
+.error-summary { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:20px; }
+.error-summary .count { font-size:20px; font-weight:600; margin-bottom:12px; }
+.error-summary .count.zero { color:var(--ok); }
+.error-summary .count.nonzero { color:var(--err); }
+
+/* Print */
+@media print {
+    :root { --bg:#fff; --bg2:#fff; --bg3:#f5f5f5; --bg4:#eee; --border:#ddd; --border2:#ccc; --text:#111; --text2:#555; --text3:#888; --gold:#8a6d1b; }
+    body { background:#fff; color:#111; font-size:11px; }
+    header,.controls,.dropzone,.analyze-btn,.progress,.logout-btn,.acc-arrow,.no-print { display:none!important; }
+    .acc-body { display:block!important; }
+    .acc { break-inside:avoid; border:1px solid #ddd; margin-bottom:12px; }
+    .card { border:1px solid #ddd; }
+    main { max-width:100%; padding:10px; }
+}
+
+/* Responsive */
+@media(max-width:600px) {
+    main { padding:16px 12px 60px; }
+    .controls { flex-direction:column; }
+    .dropzone { min-width:auto; }
+    .cards { grid-template-columns:1fr 1fr; }
+}
+
+/* Ebrain upload */
+.eb-upload { margin-top:12px; }
+.eb-upload input { display:none; }
+.eb-upload label { font-size:12px; color:var(--gold); cursor:pointer; text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login">
+<div class="login-card">
+    <div class="login-brand">ONNE</div>
+    <div class="login-title">Verificador de Remuneraciones</div>
+    <input type="password" class="login-input" id="pwd" placeholder="Clave de acceso" autocomplete="off">
+    <button class="login-btn" onclick="doLogin()">INGRESAR</button>
+    <div class="login-err" id="login-err"></div>
+</div>
+</div>
+
+<!-- App -->
+<div id="app">
+<header>
+    <div class="logo">ONNE <span>Verificador Remuneraciones</span></div>
+    <button class="logout-btn" onclick="doLogout()">Cerrar sesion</button>
+</header>
+<main>
+    <div class="controls no-print">
+        <div class="field">
+            <label>Mes</label>
+            <select id="sel-mes">
+                <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+                <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Ano</label>
+            <select id="sel-anio">
+                <option value="2025">2025</option><option value="2026" selected>2026</option><option value="2027">2027</option>
+            </select>
+        </div>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+            <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
+            <p>Arrastra el Excel aqui o haz click para seleccionar</p>
+        </div>
+        <button class="analyze-btn" id="analyze-btn" disabled onclick="runAnalysis()">ANALIZAR</button>
+    </div>
+    <div class="progress" id="progress">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text">Preparando...</div>
+    </div>
+    <div id="results"></div>
+</main>
+</div>
+
+<script>
+// ============================================================
+// CONSTANTS
+// ============================================================
+const PASSWORD = 'Onne.2026';
+const EBRAIN_URL = 'https://docs.google.com/spreadsheets/d/19Q9RE1w9DtOTgeI8fawk8wmNXI6e7WxzCe1jNGq-odU/export?format=csv&gid=1206917430';
+const CORS_PROXIES = [
+    url => url, // direct
+    url => 'https://corsproxy.io/?' + encodeURIComponent(url),
+    url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+];
+const MESES = ['','ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+const STAFF_RATE = 5500;
+const NAME_MAP = {
+    'ANGEL SEMPRUM': 'ANGEL  SEMPRUN',
+    'MARTIN OHRENS': 'MARTIN  OHRENS',
+    'FRANCO MAQUIEIRA': 'FRANCO SIMON  MAQUIEIRA',
+    'CAMILA ESCOBAR': 'CAMILA ESCOBAR',
+    'CONSTANZA PEREZ': 'LEIDY CONSTANZA PEREZ GIRALDO',
+    'VERENA ALONSO': 'VERENA ALONSO',
+    'VALERIA OLAVE': 'VALERIA OLAVE',
+    'DIEGO CORTES': 'DIEGO CORTES',
+    'GUSTAVO BENKO': 'GUSTAVO BENKO',
+    'SEBASTIAN ARAVENA': 'SEBASTIAN  ARAVENA',
+    'CESAR ENRIQUE ROSAS': 'CESAR ROSAS',
+};
+
+let workbookData = null;
+let fileName = '';
+
+// ============================================================
+// UTILITIES
+// ============================================================
+function fmt(n) {
+    if (n === null || n === undefined || isNaN(n)) return '-';
+    const neg = n < 0;
+    const abs = Math.abs(Math.round(n));
+    const s = abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (neg ? '-' : '') + '$' + s;
+}
+
+function parsePlan(s) {
+    if (!s) return null;
+    const m = String(s).trim().toLowerCase().match(/(\d+)\s*sesion/);
+    return m ? parseInt(m[1]) : null;
+}
+
+function expectedPrice(planSes, isDuo, isTrio) {
+    if (isTrio) return 18000;
+    if (isDuo) return 14000;
+    if (planSes === null) return null;
+    return planSes <= 32 ? 8500 : 10000;
+}
+
+function isNum(v) { return typeof v === 'number' && !isNaN(v); }
+function toNum(v) { return isNum(v) ? v : 0; }
+function str(v) { return v == null ? '' : String(v).trim(); }
+function up(v) { return str(v).toUpperCase(); }
+
+function parseCSV(text) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const headers = csvLine(lines[0]);
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const vals = csvLine(lines[i]);
+        const row = {};
+        headers.forEach((h, j) => row[h.trim()] = (vals[j] || '').trim());
+        rows.push(row);
+    }
+    return rows;
+}
+
+function csvLine(line) {
+    const r = []; let cur = '', inQ = false;
+    for (const ch of line) {
+        if (ch === '"') { inQ = !inQ; }
+        else if (ch === ',' && !inQ) { r.push(cur); cur = ''; }
+        else { cur += ch; }
+    }
+    r.push(cur);
+    return r;
+}
+
+function parseDate(s) {
+    if (!s) return null;
+    const p = s.split('-');
+    if (p.length !== 3) return null;
+    return { day: parseInt(p[0]), month: parseInt(p[1]), year: parseInt(p[2]) };
+}
+
+function nameParts(n) { return up(n).split(/\s+/).filter(p => p.length > 2); }
+
+function matchNames(a, b) {
+    const ap = nameParts(a), bp = nameParts(b);
+    return ap.reduce((c, p) => c + (bp.some(bp2 => bp2.includes(p) || p.includes(bp2)) ? 1 : 0), 0);
+}
+
+// ============================================================
+// LOGIN
+// ============================================================
+document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+function doLogin() {
+    if (document.getElementById('pwd').value === PASSWORD) {
+        document.getElementById('login').classList.add('hidden');
+        document.getElementById('app').style.display = 'block';
+        // Default to current month-1 (pay is usually for previous month)
+        const now = new Date();
+        const prevMonth = now.getMonth() || 12; // getMonth() is 0-based
+        document.getElementById('sel-mes').value = prevMonth;
+    } else {
+        document.getElementById('login-err').textContent = 'Clave incorrecta';
+    }
+}
+
+function doLogout() {
+    document.getElementById('login').classList.remove('hidden');
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('pwd').value = '';
+    document.getElementById('login-err').textContent = '';
+}
+
+// ============================================================
+// FILE HANDLING
+// ============================================================
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('file-input');
+
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
+fi.addEventListener('change', () => { if (fi.files[0]) handleFile(fi.files[0]); });
+
+function handleFile(file) {
+    if (!file) return;
+    fileName = file.name;
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            workbookData = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+            dz.classList.add('loaded');
+            dz.innerHTML = '<p>Archivo cargado</p><div class="file-name">' + fileName + '</div><p style="font-size:12px;color:var(--text3);margin-top:4px">Hojas: ' + workbookData.SheetNames.join(', ') + '</p>';
+            document.getElementById('analyze-btn').disabled = false;
+        } catch (err) {
+            alert('Error al leer el archivo: ' + err.message);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+// PROGRESS
+// ============================================================
+function showProgress(pct, text) {
+    const el = document.getElementById('progress');
+    el.classList.add('show');
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-text').textContent = text;
+}
+function hideProgress() { document.getElementById('progress').classList.remove('show'); }
+
+// ============================================================
+// FIND SHEETS
+// ============================================================
+function findMainSheet(wb) {
+    const exclude = ['HORAS DE STAFF', 'EBRAIN', 'FUGA', 'REEMPLAZOS', 'REVISION'];
+    // Try month names first
+    for (const n of wb.SheetNames) {
+        if (MESES.includes(n.toUpperCase())) return n;
+    }
+    // First non-excluded
+    for (const n of wb.SheetNames) {
+        if (!exclude.includes(n.toUpperCase())) return n;
+    }
+    return wb.SheetNames[0];
+}
+
+function getSheetData(wb, name) {
+    const ws = wb.Sheets[name];
+    if (!ws) return [];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+}
+
+// ============================================================
+// PARSE EXCEL - PROFESSORS & STUDENTS
+// ============================================================
+function parseExcel(wb) {
+    const mainName = findMainSheet(wb);
+    const data = getSheetData(wb, mainName);
+    const profesores = [];
+    let cur = null;
+
+    for (let i = 0; i < data.length; i++) {
+        const row = data[i] || [];
+        const B = row[1], C = row[2], D = row[3], E = row[4], F = row[5];
+        const G = row[6], H = row[7], I = row[8], J = row[9];
+        const R = row[17], S = row[18], T = row[19];
+        const bStr = up(B);
+
+        // Professor header: E = "FECHA PLAN"
+        if (E && up(E) === 'FECHA PLAN') {
+            const name = str(B) || str(C);
+            if (name) {
+                if (cur) profesores.push(cur);
+                cur = {
+                    nombre: name, row: i + 1, students: [],
+                    totalSessions: null, totalPagar: null,
+                    staffHours: 0, staffAmount: 0, boxAmount: 0, comision: 0,
+                    totalAPagarReported: null, errors: []
+                };
+            }
+            continue;
+        }
+        if (!cur) continue;
+
+        // TOTAL row
+        if (F && up(F) === 'TOTAL') {
+            cur.totalSessions = G;
+            cur.totalPagar = J;
+            continue;
+        }
+
+        // Sidebar R/S/T
+        if (R) {
+            const rStr = up(R);
+            if (rStr.includes('STAFF') || (rStr.includes('HORA') && rStr.replace(/\s/g, '').includes('STAFF'))) {
+                cur.staffHours = toNum(S); cur.staffAmount = toNum(T);
+            } else if (rStr.includes('TOTAL') && rStr.includes('PAGAR')) {
+                cur.totalAPagarReported = T;
+            } else if (rStr.includes('COMISION')) {
+                cur.comision = toNum(T);
+            } else if (rStr.includes('BOX')) {
+                cur.boxAmount = toNum(T);
+            }
+        }
+
+        // Student rows
+        if (C && up(C) !== 'SOCIO' && !(E && up(E) === 'FECHA PLAN')) {
+            if ((bStr === 'REEMPLAZOS' || bStr === 'REEMPLAZO') && (!J || J === 0)) continue;
+
+            const isDuo = bStr === 'DUO';
+            const isTrio = bStr === 'TRIO';
+            const isCong = bStr === 'CONGELO' || bStr === 'CONGELADA';
+            const isVac = bStr.includes('VACACION');
+            const isReemp = (D && String(D).toLowerCase().includes('reemplazo')) ||
+                            (H && up(H).includes('REEMPLAZO')) || bStr === 'REEMPLAZO';
+
+            const sessions = isNum(G) ? G : 0;
+            const valor = isNum(I) ? I : 0;
+            const total = isNum(J) ? J : 0;
+            const plan = str(H);
+            const planSes = parsePlan(plan);
+
+            const student = {
+                row: i + 1, nombre: str(C), sessions, plan, planSes,
+                valor, total, isDuo, isTrio, isCong, isVac, isReemp, errors: []
+            };
+
+            // Skip frozen/vacation with 0
+            if (sessions === 0 && (isCong || isVac)) { cur.students.push(student); continue; }
+            if (typeof G === 'string' && G.toLowerCase().includes('congel')) { cur.students.push(student); continue; }
+
+            // Check VALOR PT
+            if (sessions > 0 && valor > 0) {
+                const exp = expectedPrice(planSes, isDuo, isTrio);
+                if (exp && valor !== exp) {
+                    student.errors.push('VALOR: ' + fmt(valor) + ' deberia ser ' + fmt(exp) + ' (plan ' + (planSes || '?') + ' ses)');
+                }
+            }
+
+            // Check sin precio
+            if (sessions > 0 && valor === 0 && !isCong && !isVac) {
+                student.errors.push('Sesiones > 0 sin precio asignado');
+            }
+
+            // Check TOTAL = sessions x valor
+            if (sessions > 0 && valor > 0) {
+                const expT = Math.round(sessions * valor);
+                if (Math.round(total) !== expT) {
+                    student.errors.push('CALCULO: ' + fmt(total) + ' deberia ser ' + fmt(expT) + ' (' + sessions + ' x ' + fmt(valor) + ')');
+                }
+            }
+
+            cur.students.push(student);
+        }
+    }
+    if (cur) profesores.push(cur);
+
+    // Check duplicates within each professor
+    for (const prof of profesores) {
+        const seen = {};
+        for (const s of prof.students) {
+            const key = s.nombre.toUpperCase();
+            if (seen[key] && s.sessions > 0) {
+                s.errors.push('Alumno duplicado (tambien en fila ' + seen[key] + ')');
+            } else if (s.sessions > 0) {
+                seen[key] = s.row;
+            }
+        }
+    }
+
+    return { profesores, mainSheet: mainName };
+}
+
+// ============================================================
+// VERIFY PROFESSORS
+// ============================================================
+function verifyProfessors(profesores) {
+    const allErrors = [];
+
+    for (const prof of profesores) {
+        const sumSes = prof.students.reduce((a, s) => a + (isNum(s.sessions) ? s.sessions : 0), 0);
+        const sumMoney = prof.students.reduce((a, s) => a + (isNum(s.total) ? s.total : 0), 0);
+        const active = prof.students.filter(s => s.sessions > 0);
+
+        prof.sumSessions = sumSes;
+        prof.sumMoney = sumMoney;
+        prof.activeCount = active.length;
+
+        // Sessions check
+        if (prof.totalSessions !== null && prof.totalSessions !== undefined) {
+            if (Math.round(sumSes) !== Math.round(toNum(prof.totalSessions))) {
+                const diff = sumSes - toNum(prof.totalSessions);
+                const e = 'SESIONES: sumadas=' + Math.round(sumSes) + ' vs reportadas=' + Math.round(toNum(prof.totalSessions)) + ' (dif: ' + (diff > 0 ? '+' : '') + Math.round(diff) + ')';
+                prof.errors.push(e);
+                allErrors.push({ prof: prof.nombre, error: e });
+            }
+        }
+
+        // Money check
+        if (prof.totalPagar !== null && prof.totalPagar !== undefined) {
+            if (Math.round(sumMoney) !== Math.round(toNum(prof.totalPagar))) {
+                const diff = sumMoney - toNum(prof.totalPagar);
+                const e = 'DINERO: sumado=' + fmt(sumMoney) + ' vs reportado=' + fmt(prof.totalPagar) + ' (dif: ' + fmt(diff) + ')';
+                prof.errors.push(e);
+                allErrors.push({ prof: prof.nombre, error: e });
+            }
+        }
+
+        // Total a pagar check
+        const pt = toNum(prof.totalPagar) || sumMoney;
+        const totalComp = pt + prof.staffAmount + prof.boxAmount + prof.comision;
+        prof.totalComputed = totalComp;
+        if (prof.totalAPagarReported !== null && prof.totalAPagarReported !== undefined) {
+            if (Math.round(totalComp) !== Math.round(toNum(prof.totalAPagarReported))) {
+                const diff = totalComp - toNum(prof.totalAPagarReported);
+                const e = 'TOTAL A PAGAR: calculado=' + fmt(totalComp) + ' vs reportado=' + fmt(prof.totalAPagarReported) + ' (dif: ' + fmt(diff) + ')';
+                prof.errors.push(e);
+                allErrors.push({ prof: prof.nombre, error: e });
+            }
+        }
+
+        // Student errors
+        for (const s of prof.students) {
+            for (const e of s.errors) {
+                allErrors.push({ prof: prof.nombre, error: 'Fila ' + s.row + ' - ' + s.nombre + ': ' + e });
+            }
+        }
+    }
+
+    return allErrors;
+}
+
+// ============================================================
+// PARSE STAFF SHEET
+// ============================================================
+function parseStaff(wb) {
+    const staffData = [];
+    let ws = null;
+    for (const n of wb.SheetNames) {
+        if (up(n).includes('STAFF')) { ws = n; break; }
+    }
+    if (!ws) return staffData;
+
+    const data = getSheetData(wb, ws);
+    // Start from row 4 (index 3)
+    for (let i = 3; i < data.length; i++) {
+        const row = data[i] || [];
+        const name = row[1];
+        const hrs = row[34]; // Column AI (35th, 0-indexed 34)
+        const money = row[35]; // Column AJ
+        if (name && hrs && toNum(hrs) > 0) {
+            const expected = toNum(hrs) * STAFF_RATE;
+            const actual = toNum(money);
+            staffData.push({
+                nombre: str(name), hours: toNum(hrs), money: actual,
+                expected, ok: Math.round(actual) === Math.round(expected)
+            });
+        }
+    }
+    return staffData;
+}
+
+// ============================================================
+// FETCH EBRAIN CSV
+// ============================================================
+async function fetchEbrain() {
+    for (const proxy of CORS_PROXIES) {
+        try {
+            const url = proxy(EBRAIN_URL);
+            const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            if (text.includes('Fecha Sesi') || text.includes('Nombre Alumno')) {
+                return parseCSV(text);
+            }
+        } catch (e) { /* try next */ }
+    }
+    return null;
+}
+
+// ============================================================
+// COMPARE WITH EBRAIN
+// ============================================================
+function compareEbrain(profesores, ebrainRows, mesNum, anio) {
+    if (!ebrainRows || !ebrainRows.length) return null;
+
+    // Find correct column names (handle accent variations)
+    const sample = ebrainRows[0];
+    const fechaKey = Object.keys(sample).find(k => k.includes('Fecha')) || 'Fecha Sesion';
+    const alumnoKey = Object.keys(sample).find(k => k.includes('Nombre Alumno')) || 'Nombre Alumno';
+    const profKey = Object.keys(sample).find(k => k.includes('Profesor')) || 'Profesor';
+
+    // Filter by month/year
+    const filtered = ebrainRows.filter(r => {
+        const d = parseDate(r[fechaKey]);
+        return d && d.month === mesNum && d.year === anio;
+    });
+
+    if (!filtered.length) return { comparison: [], onlyEbrain: [], totalAdmin: 0, totalEbrain: 0, noData: true };
+
+    // Group by professor
+    const ebByProf = {};
+    const ebDetail = {};
+    for (const r of filtered) {
+        const prof = up(r[profKey]);
+        const alumno = up(r[alumnoKey]);
+        ebByProf[prof] = (ebByProf[prof] || 0) + 1;
+        if (!ebDetail[prof]) ebDetail[prof] = {};
+        ebDetail[prof][alumno] = (ebDetail[prof][alumno] || 0) + 1;
+    }
+
+    // Find ebrain professor for admin professor
+    function findEbProf(adminName) {
+        const target = (NAME_MAP[up(adminName)] || adminName).toUpperCase().replace(/\s+/g, ' ');
+        // Exact
+        for (const k of Object.keys(ebByProf)) {
+            if (k.replace(/\s+/g, ' ') === target) return k;
+        }
+        // Fuzzy: check parts with length > 3
+        const parts = up(adminName).split(/\s+/).filter(p => p.length > 3);
+        for (const k of Object.keys(ebByProf)) {
+            if (parts.some(p => k.includes(p))) return k;
+        }
+        return null;
+    }
+
+    const comparison = [];
+    const matchedEb = new Set();
+    let totalAdmin = 0, totalEbrainMatched = 0;
+
+    for (const prof of profesores) {
+        const adminSes = Math.round(toNum(prof.totalSessions) || prof.sumSessions || prof.students.reduce((a, s) => a + toNum(s.sessions), 0));
+        totalAdmin += adminSes;
+        const ebKey = findEbProf(prof.nombre);
+        if (ebKey) {
+            matchedEb.add(ebKey);
+            const ebSes = ebByProf[ebKey];
+            totalEbrainMatched += ebSes;
+            const diff = adminSes - ebSes;
+
+            // Student detail if diff != 0
+            let detail = [];
+            if (diff !== 0) {
+                detail = buildStudentDetail(prof, ebDetail[ebKey] || {});
+            }
+
+            comparison.push({
+                profName: prof.nombre, adminSes, ebrainSes: ebSes, diff,
+                status: diff === 0 ? 'OK' : 'DIF', detail
+            });
+        } else {
+            comparison.push({
+                profName: prof.nombre, adminSes, ebrainSes: null, diff: null,
+                status: 'NO MATCH', detail: []
+            });
+        }
+    }
+
+    // Only in Ebrain
+    const onlyEbrain = [];
+    for (const [k, v] of Object.entries(ebByProf)) {
+        if (!matchedEb.has(k) && v > 0) onlyEbrain.push({ name: k, sessions: v });
+    }
+
+    return { comparison, onlyEbrain, totalAdmin, totalEbrain: Object.values(ebByProf).reduce((a, b) => a + b, 0), totalEbrainMatched };
+}
+
+function buildStudentDetail(prof, ebStudents) {
+    const adminAlumnos = {};
+    for (const s of prof.students) {
+        const key = up(s.nombre);
+        adminAlumnos[key] = (adminAlumnos[key] || 0) + toNum(s.sessions);
+    }
+
+    const allEb = new Set(Object.keys(ebStudents));
+    const matches = {};
+    const unmatchedAdmin = new Set();
+
+    // Match admin students to ebrain students
+    for (const aName of Object.keys(adminAlumnos)) {
+        const aParts = nameParts(aName);
+        let bestMatch = null, bestScore = 0;
+        for (const eName of allEb) {
+            const score = matchNames(aName, eName);
+            if (score >= 1 && score > bestScore) {
+                bestMatch = eName; bestScore = score;
+            }
+        }
+        if (bestMatch) {
+            matches[aName] = bestMatch;
+            allEb.delete(bestMatch);
+        } else {
+            unmatchedAdmin.add(aName);
+        }
+    }
+
+    const detail = [];
+    for (const aName of Object.keys(adminAlumnos).sort()) {
+        const aSes = adminAlumnos[aName];
+        if (matches[aName]) {
+            const eSes = ebStudents[matches[aName]] || 0;
+            const d = aSes - eSes;
+            detail.push({ alumno: aName, adminSes: aSes, ebrainSes: eSes, diff: d, status: d === 0 ? 'OK' : 'DIF' });
+        } else if (aSes > 0) {
+            detail.push({ alumno: aName, adminSes: aSes, ebrainSes: null, diff: null, status: 'SOLO ADMIN' });
+        }
+    }
+    for (const eName of [...allEb].sort()) {
+        const eSes = ebStudents[eName] || 0;
+        if (eSes > 0) {
+            detail.push({ alumno: eName, adminSes: null, ebrainSes: eSes, diff: null, status: 'SOLO EBRAIN' });
+        }
+    }
+    return detail;
+}
+
+// ============================================================
+// RUN ANALYSIS
+// ============================================================
+async function runAnalysis() {
+    if (!workbookData) return;
+    const mesNum = parseInt(document.getElementById('sel-mes').value);
+    const anio = parseInt(document.getElementById('sel-anio').value);
+
+    showProgress(10, 'Leyendo archivo Excel...');
+    await new Promise(r => setTimeout(r, 100));
+
+    let parsed, staffData, allErrors;
+    try {
+        parsed = parseExcel(workbookData);
+        showProgress(30, 'Verificando datos (' + parsed.profesores.length + ' profesores)...');
+        await new Promise(r => setTimeout(r, 100));
+
+        allErrors = verifyProfessors(parsed.profesores);
+        staffData = parseStaff(workbookData);
+
+        // Staff errors
+        for (const s of staffData) {
+            if (!s.ok) {
+                allErrors.push({ prof: 'STAFF', error: s.nombre + ': ' + fmt(s.money) + ' deberia ser ' + fmt(s.expected) + ' (' + s.hours + ' x ' + fmt(STAFF_RATE) + ')' });
+            }
+        }
+    } catch (err) {
+        hideProgress();
+        alert('Error al parsear el Excel: ' + err.message);
+        console.error(err);
+        return;
+    }
+
+    showProgress(60, 'Conectando con Ebrain...');
+    let ebrainResult = null;
+    let ebrainError = false;
+    let ebrainCsvData = null;
+
+    try {
+        ebrainCsvData = await fetchEbrain();
+        if (ebrainCsvData) {
+            showProgress(80, 'Comparando con Ebrain...');
+            await new Promise(r => setTimeout(r, 100));
+            ebrainResult = compareEbrain(parsed.profesores, ebrainCsvData, mesNum, anio);
+
+            // Add ebrain errors
+            if (ebrainResult && ebrainResult.comparison) {
+                for (const c of ebrainResult.comparison) {
+                    if (c.status === 'DIF') {
+                        allErrors.push({ prof: c.profName, error: 'EBRAIN: Admin=' + c.adminSes + ' vs Ebrain=' + c.ebrainSes + ' (dif: ' + (c.diff > 0 ? '+' : '') + c.diff + ')' });
+                    }
+                }
+            }
+        } else {
+            ebrainError = true;
+        }
+    } catch (e) {
+        ebrainError = true;
+        console.error('Ebrain fetch error:', e);
+    }
+
+    showProgress(100, 'Listo!');
+    await new Promise(r => setTimeout(r, 300));
+    hideProgress();
+
+    renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, mesNum, anio, ebrainCsvData);
+}
+
+// ============================================================
+// RENDER RESULTS
+// ============================================================
+function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, mesNum, anio, ebrainCsvData) {
+    const profs = parsed.profesores;
+    const totalSes = profs.reduce((a, p) => a + (p.sumSessions || 0), 0);
+    const grandTotal = profs.reduce((a, p) => a + (p.totalComputed || 0), 0);
+    const errCount = allErrors.length;
+    const mesName = MESES[mesNum];
+
+    let html = '';
+
+    // Summary cards
+    html += '<div class="cards">';
+    html += card('Profesores', profs.length, profs.filter(p => p.errors.length || p.students.some(s => s.errors.length)).length + ' con observaciones');
+    html += card('Sesiones Totales', Math.round(totalSes), mesName + ' ' + anio);
+    html += card('Monto Total', fmt(grandTotal), 'PT + Staff + Box + Comision');
+    html += '<div class="card"><div class="card-label">Errores</div><div class="card-value ' + (errCount ? 'err' : 'ok') + '">' + errCount + '</div><div class="card-sub">' + (errCount ? 'Requieren revision' : 'Todo correcto') + '</div></div>';
+    html += '</div>';
+
+    // Professors section
+    html += '<div class="section"><div class="section-title">Detalle por Profesor</div>';
+    profs.forEach((p, idx) => {
+        const hasErr = p.errors.length > 0 || p.students.some(s => s.errors.length > 0);
+        const dotClass = hasErr ? 'err' : 'ok';
+        const errTotal = p.errors.length + p.students.reduce((a, s) => a + s.errors.length, 0);
+
+        html += '<div class="acc" id="acc-' + idx + '">';
+        html += '<div class="acc-head" onclick="toggleAcc(' + idx + ')">';
+        html += '<div class="acc-left"><div class="acc-dot ' + dotClass + '"></div>';
+        html += '<div><div class="acc-name">' + esc(p.nombre) + '</div>';
+        html += '<div class="acc-stats">' + p.activeCount + ' alumnos &middot; ' + Math.round(p.sumSessions) + ' sesiones &middot; ' + fmt(p.sumMoney) + '</div>';
+        html += '</div></div>';
+        html += '<div style="display:flex;align-items:center;gap:8px">';
+        if (errTotal > 0) html += '<div class="acc-badge">' + errTotal + ' error' + (errTotal > 1 ? 'es' : '') + '</div>';
+        html += '<div class="acc-arrow">&#9660;</div></div></div>';
+
+        html += '<div class="acc-body">';
+
+        // Info grid
+        html += '<div class="info-grid">';
+        html += infoItem('Sesiones reportadas', p.totalSessions !== null ? Math.round(toNum(p.totalSessions)) : '-', Math.round(p.sumSessions) === Math.round(toNum(p.totalSessions)) ? 'ok' : (p.totalSessions !== null ? 'err' : ''));
+        html += infoItem('PT reportado', p.totalPagar !== null ? fmt(p.totalPagar) : '-', Math.round(p.sumMoney) === Math.round(toNum(p.totalPagar)) ? 'ok' : (p.totalPagar !== null ? 'err' : ''));
+        if (p.staffAmount > 0) html += infoItem('Staff', p.staffHours + 'h = ' + fmt(p.staffAmount), '');
+        if (p.boxAmount > 0) html += infoItem('Box', fmt(p.boxAmount), '');
+        if (p.comision > 0) html += infoItem('Comision', fmt(p.comision), '');
+        if (p.totalAPagarReported !== null) {
+            const ok2 = Math.round(p.totalComputed) === Math.round(toNum(p.totalAPagarReported));
+            html += infoItem('Total a Pagar', fmt(p.totalAPagarReported), ok2 ? 'ok' : 'err');
+        }
+        html += '</div>';
+
+        // Students table
+        html += '<table><thead><tr><th>Fila</th><th>Alumno</th><th></th><th class="num">Ses</th><th>Plan</th><th class="num">Valor</th><th class="num">Total</th></tr></thead><tbody>';
+        for (const s of p.students) {
+            const rowClass = s.errors.length ? 'err-row' : '';
+            let tags = '';
+            if (s.isDuo) tags += '<span class="tag tag-duo">DUO</span> ';
+            if (s.isTrio) tags += '<span class="tag tag-trio">TRIO</span> ';
+            if (s.isCong) tags += '<span class="tag tag-cong">CONG</span> ';
+            if (s.isReemp) tags += '<span class="tag tag-reemp">REEMP</span> ';
+
+            html += '<tr class="' + rowClass + '">';
+            html += '<td style="color:var(--text3)">' + s.row + '</td>';
+            html += '<td>' + esc(s.nombre) + '</td>';
+            html += '<td>' + tags + '</td>';
+            html += '<td class="num">' + (s.sessions || '-') + '</td>';
+            html += '<td style="font-size:11px;color:var(--text2)">' + esc(s.plan) + '</td>';
+            html += '<td class="num">' + (s.valor ? fmt(s.valor) : '-') + '</td>';
+            html += '<td class="num">' + (s.total ? fmt(s.total) : '-') + '</td>';
+            html += '</tr>';
+            if (s.errors.length) {
+                html += '<tr class="err-row"><td></td><td colspan="6" style="padding:2px 10px 8px">';
+                for (const e of s.errors) html += '<div style="font-size:12px;color:var(--err)">' + esc(e) + '</div>';
+                html += '</td></tr>';
+            }
+        }
+        html += '</tbody></table>';
+
+        // Professor-level errors
+        if (p.errors.length) {
+            html += '<div class="err-list">';
+            for (const e of p.errors) html += '<div class="err-list-item">' + esc(e) + '</div>';
+            html += '</div>';
+        }
+
+        html += '</div></div>'; // acc-body, acc
+    });
+    html += '</div>';
+
+    // Staff section
+    if (staffData.length) {
+        html += '<div class="section"><div class="section-title">Horas de Staff</div>';
+        html += '<div class="summary-table"><table><thead><tr><th>Nombre</th><th class="num">Horas</th><th class="num">Esperado</th><th class="num">Reportado</th><th>Estado</th></tr></thead><tbody>';
+        for (const s of staffData) {
+            html += '<tr class="' + (s.ok ? '' : 'err-row') + '">';
+            html += '<td>' + esc(s.nombre) + '</td>';
+            html += '<td class="num">' + s.hours + '</td>';
+            html += '<td class="num">' + fmt(s.expected) + '</td>';
+            html += '<td class="num">' + fmt(s.money) + '</td>';
+            html += '<td>' + (s.ok ? '<span style="color:var(--ok)">OK</span>' : '<span style="color:var(--err)">ERROR</span>') + '</td>';
+            html += '</tr>';
+        }
+        html += '</tbody></table></div></div>';
+    }
+
+    // Ebrain section
+    html += '<div class="section"><div class="section-title">Comparacion con Ebrain (Google Sheets)</div>';
+    if (ebrainError || !ebrainResult) {
+        html += '<div class="eb-status error">No se pudo conectar con Google Sheets. Puedes subir el CSV manualmente.</div>';
+        html += '<div class="eb-upload no-print"><input type="file" id="eb-csv-input" accept=".csv"><label for="eb-csv-input">Subir CSV de Ebrain</label></div>';
+    } else if (ebrainResult.noData) {
+        html += '<div class="eb-status error">No se encontraron datos de Ebrain para ' + mesName + ' ' + anio + '.</div>';
+    } else {
+        html += '<div class="eb-status success">Datos de Ebrain cargados: ' + ebrainResult.totalEbrain + ' sesiones en ' + mesName + ' ' + anio + '</div>';
+
+        // Comparison table
+        html += '<div class="summary-table" style="margin-bottom:16px"><table><thead><tr><th>Profesor</th><th class="num">Admin</th><th class="num">Ebrain</th><th class="num">Dif</th><th>Estado</th></tr></thead><tbody>';
+        for (const c of ebrainResult.comparison) {
+            const cls = c.status === 'DIF' ? 'err-row' : '';
+            html += '<tr class="' + cls + '">';
+            html += '<td>' + esc(c.profName) + '</td>';
+            html += '<td class="num">' + c.adminSes + '</td>';
+            html += '<td class="num">' + (c.ebrainSes !== null ? c.ebrainSes : '?') + '</td>';
+            html += '<td class="num">' + (c.diff !== null ? (c.diff > 0 ? '+' : '') + c.diff : '-') + '</td>';
+            html += '<td>' + statusTag(c.status) + '</td>';
+            html += '</tr>';
+
+            // Detail for differences
+            if (c.detail && c.detail.length) {
+                html += '<tr><td></td><td colspan="4" style="padding:4px 10px 12px">';
+                html += '<table style="font-size:12px;margin:0"><thead><tr><th>Alumno</th><th class="num">Admin</th><th class="num">Ebrain</th><th class="num">Dif</th><th></th></tr></thead><tbody>';
+                for (const d of c.detail) {
+                    const dc = d.status !== 'OK' ? 'err-row' : '';
+                    html += '<tr class="' + dc + '">';
+                    html += '<td>' + esc(d.alumno) + '</td>';
+                    html += '<td class="num">' + (d.adminSes !== null ? d.adminSes : '?') + '</td>';
+                    html += '<td class="num">' + (d.ebrainSes !== null ? d.ebrainSes : '?') + '</td>';
+                    html += '<td class="num">' + (d.diff !== null ? (d.diff > 0 ? '+' : '') + d.diff : '-') + '</td>';
+                    html += '<td>' + statusTag(d.status) + '</td>';
+                    html += '</tr>';
+                }
+                html += '</tbody></table></td></tr>';
+            }
+        }
+
+        // Only in Ebrain
+        for (const e of (ebrainResult.onlyEbrain || [])) {
+            html += '<tr class="err-row"><td>[SOLO EBRAIN] ' + esc(e.name) + '</td><td class="num">-</td><td class="num">' + e.sessions + '</td><td class="num">-</td><td>' + statusTag('SOLO EBRAIN') + '</td></tr>';
+        }
+
+        // Totals row
+        html += '<tr class="total-row"><td>TOTALES</td><td class="num">' + ebrainResult.totalAdmin + '</td><td class="num">' + ebrainResult.totalEbrainMatched + '</td><td class="num">' + (ebrainResult.totalAdmin - ebrainResult.totalEbrainMatched > 0 ? '+' : '') + (ebrainResult.totalAdmin - ebrainResult.totalEbrainMatched) + '</td><td></td></tr>';
+        html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    // Grand summary table
+    html += '<div class="section"><div class="section-title">Resumen por Profesor</div>';
+    html += '<div class="summary-table"><table><thead><tr><th>Profesor</th><th class="num">Ses</th><th class="num">PT</th><th class="num">Staff</th><th class="num">Box</th><th class="num">Com</th><th class="num">Total</th></tr></thead><tbody>';
+    let gSes = 0, gPT = 0, gSt = 0, gBx = 0, gCo = 0, gTo = 0;
+    for (const p of profs) {
+        const pt = toNum(p.totalPagar) || p.sumMoney;
+        const total = pt + p.staffAmount + p.boxAmount + p.comision;
+        const ses = Math.round(toNum(p.totalSessions) || p.sumSessions);
+        gSes += ses; gPT += pt; gSt += p.staffAmount; gBx += p.boxAmount; gCo += p.comision; gTo += total;
+        html += '<tr><td>' + esc(p.nombre) + '</td><td class="num">' + ses + '</td><td class="num">' + fmt(pt) + '</td><td class="num">' + fmt(p.staffAmount) + '</td><td class="num">' + fmt(p.boxAmount) + '</td><td class="num">' + fmt(p.comision) + '</td><td class="num">' + fmt(total) + '</td></tr>';
+    }
+    html += '<tr class="total-row"><td>GRAN TOTAL</td><td class="num">' + gSes + '</td><td class="num">' + fmt(gPT) + '</td><td class="num">' + fmt(gSt) + '</td><td class="num">' + fmt(gBx) + '</td><td class="num">' + fmt(gCo) + '</td><td class="num">' + fmt(gTo) + '</td></tr>';
+    html += '</tbody></table></div></div>';
+
+    // Error summary
+    html += '<div class="section"><div class="section-title">Resumen de Errores</div>';
+    html += '<div class="error-summary">';
+    html += '<div class="count ' + (errCount ? 'nonzero' : 'zero') + '">' + errCount + ' error' + (errCount !== 1 ? 'es' : '') + ' encontrado' + (errCount !== 1 ? 's' : '') + '</div>';
+    if (errCount) {
+        html += '<table><thead><tr><th>#</th><th>Profesor</th><th>Detalle</th></tr></thead><tbody>';
+        allErrors.forEach((e, i) => {
+            html += '<tr><td style="color:var(--text3)">' + (i + 1) + '</td><td style="white-space:nowrap">' + esc(e.prof) + '</td><td style="color:var(--err)">' + esc(e.error) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+    }
+    html += '</div></div>';
+
+    // Print button
+    html += '<div class="no-print" style="text-align:center;margin-top:24px"><button class="analyze-btn" onclick="window.print()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border)">Exportar PDF (Imprimir)</button></div>';
+
+    document.getElementById('results').innerHTML = html;
+
+    // Bind CSV upload if needed
+    const ebInput = document.getElementById('eb-csv-input');
+    if (ebInput) {
+        ebInput.addEventListener('change', async function() {
+            const file = this.files[0];
+            if (!file) return;
+            const text = await file.text();
+            const rows = parseCSV(text);
+            if (rows.length) {
+                const ebResult = compareEbrain(profs, rows, mesNum, anio);
+                // Re-render with Ebrain data
+                const newErrors = [...allErrors];
+                if (ebResult && ebResult.comparison) {
+                    for (const c of ebResult.comparison) {
+                        if (c.status === 'DIF') {
+                            newErrors.push({ prof: c.profName, error: 'EBRAIN: Admin=' + c.adminSes + ' vs Ebrain=' + c.ebrainSes + ' (dif: ' + (c.diff > 0 ? '+' : '') + c.diff + ')' });
+                        }
+                    }
+                }
+                renderResults(parsed, staffData, newErrors, ebResult, false, mesNum, anio, rows);
+            }
+        });
+    }
+}
+
+// ============================================================
+// RENDER HELPERS
+// ============================================================
+function card(label, value, sub) {
+    return '<div class="card"><div class="card-label">' + label + '</div><div class="card-value">' + value + '</div><div class="card-sub">' + sub + '</div></div>';
+}
+
+function infoItem(label, value, cls) {
+    return '<div class="info-item"><div class="lbl">' + label + '</div><div class="val ' + cls + '">' + value + '</div></div>';
+}
+
+function statusTag(status) {
+    const colors = { OK: 'var(--ok)', DIF: 'var(--err)', 'NO MATCH': 'var(--warn)', 'SOLO ADMIN': 'var(--warn)', 'SOLO EBRAIN': 'var(--warn)' };
+    return '<span style="color:' + (colors[status] || 'var(--text2)') + ';font-size:12px;font-weight:600">' + status + '</span>';
+}
+
+function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toggleAcc(idx) {
+    document.getElementById('acc-' + idx).classList.toggle('open');
+}
+</script>
+</body>
+</html>
