@@ -476,31 +476,41 @@ function parseExcel(wb) {
 
             const student = {
                 row: i + 1, nombre: str(C), sessions, plan, planSes,
-                valor, total, isDuo, isTrio, isCong, isVac, isReemp, errors: []
+                valor, total, isDuo, isTrio, isCong, isVac, isReemp, errors: [],
+                valorCorregido: null, totalCorregido: null
             };
 
             // Skip frozen/vacation with 0
             if (sessions === 0 && (isCong || isVac)) { cur.students.push(student); continue; }
             if (typeof G === 'string' && G.toLowerCase().includes('congel')) { cur.students.push(student); continue; }
 
+            // Determine correct price
+            const exp = expectedPrice(planSes, isDuo, isTrio);
+
             // Check VALOR PT
-            if (sessions > 0 && valor > 0) {
-                const exp = expectedPrice(planSes, isDuo, isTrio);
-                if (exp && valor !== exp) {
-                    student.errors.push('VALOR: ' + fmt(valor) + ' deberia ser ' + fmt(exp) + ' (plan ' + (planSes || '?') + ' ses)');
-                }
+            if (sessions > 0 && valor > 0 && exp && valor !== exp) {
+                student.valorCorregido = exp;
+                student.totalCorregido = Math.round(sessions * exp);
+                student.errors.push('VALOR: reportado ' + fmt(valor) + ' → corregido ' + fmt(exp) + ' (plan ' + (planSes || '?') + ' ses)');
             }
 
             // Check sin precio
             if (sessions > 0 && valor === 0 && !isCong && !isVac) {
-                student.errors.push('Sesiones > 0 sin precio asignado');
+                if (exp) {
+                    student.valorCorregido = exp;
+                    student.totalCorregido = Math.round(sessions * exp);
+                    student.errors.push('Sin precio asignado → corregido ' + fmt(exp) + ' = ' + fmt(student.totalCorregido));
+                } else {
+                    student.errors.push('Sin precio asignado (plan no detectado)');
+                }
             }
 
-            // Check TOTAL = sessions x valor
-            if (sessions > 0 && valor > 0) {
+            // Check TOTAL = sessions x valor (only if valor is correct)
+            if (sessions > 0 && valor > 0 && !student.valorCorregido) {
                 const expT = Math.round(sessions * valor);
                 if (Math.round(total) !== expT) {
-                    student.errors.push('CALCULO: ' + fmt(total) + ' deberia ser ' + fmt(expT) + ' (' + sessions + ' x ' + fmt(valor) + ')');
+                    student.totalCorregido = expT;
+                    student.errors.push('CALCULO: reportado ' + fmt(total) + ' → corregido ' + fmt(expT) + ' (' + sessions + ' x ' + fmt(valor) + ')');
                 }
             }
 
@@ -508,19 +518,6 @@ function parseExcel(wb) {
         }
     }
     if (cur) profesores.push(cur);
-
-    // Check duplicates within each professor
-    for (const prof of profesores) {
-        const seen = {};
-        for (const s of prof.students) {
-            const key = s.nombre.toUpperCase();
-            if (seen[key] && s.sessions > 0) {
-                s.errors.push('Alumno duplicado (tambien en fila ' + seen[key] + ')');
-            } else if (s.sessions > 0) {
-                seen[key] = s.row;
-            }
-        }
-    }
 
     return { profesores, mainSheet: mainName };
 }
@@ -534,10 +531,13 @@ function verifyProfessors(profesores) {
     for (const prof of profesores) {
         const sumSes = prof.students.reduce((a, s) => a + (isNum(s.sessions) ? s.sessions : 0), 0);
         const sumMoney = prof.students.reduce((a, s) => a + (isNum(s.total) ? s.total : 0), 0);
+        const sumMoneyCorr = prof.students.reduce((a, s) => a + (s.totalCorregido !== null ? s.totalCorregido : (isNum(s.total) ? s.total : 0)), 0);
         const active = prof.students.filter(s => s.sessions > 0);
 
         prof.sumSessions = sumSes;
         prof.sumMoney = sumMoney;
+        prof.sumMoneyCorregido = sumMoneyCorr;
+        prof.hasCorrecciones = sumMoneyCorr !== sumMoney;
         prof.activeCount = active.length;
 
         // Sessions check
@@ -564,6 +564,8 @@ function verifyProfessors(profesores) {
         const pt = toNum(prof.totalPagar) || sumMoney;
         const totalComp = pt + prof.staffAmount + prof.boxAmount + prof.comision;
         prof.totalComputed = totalComp;
+        const ptCorr = prof.hasCorrecciones ? sumMoneyCorr : pt;
+        prof.totalComputedCorregido = ptCorr + prof.staffAmount + prof.boxAmount + prof.comision;
         if (prof.totalAPagarReported !== null && prof.totalAPagarReported !== undefined) {
             if (Math.round(totalComp) !== Math.round(toNum(prof.totalAPagarReported))) {
                 const diff = totalComp - toNum(prof.totalAPagarReported);
@@ -867,7 +869,7 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
         html += '<div class="acc-head" onclick="toggleAcc(' + idx + ')">';
         html += '<div class="acc-left"><div class="acc-dot ' + dotClass + '"></div>';
         html += '<div><div class="acc-name">' + esc(p.nombre) + '</div>';
-        html += '<div class="acc-stats">' + p.activeCount + ' alumnos &middot; ' + Math.round(p.sumSessions) + ' sesiones &middot; ' + fmt(p.sumMoney) + '</div>';
+        html += '<div class="acc-stats">' + p.activeCount + ' alumnos &middot; ' + Math.round(p.sumSessions) + ' sesiones &middot; ' + fmt(p.sumMoney) + (p.hasCorrecciones ? ' → ' + fmt(p.sumMoneyCorregido) : '') + '</div>';
         html += '</div></div>';
         html += '<div style="display:flex;align-items:center;gap:8px">';
         if (errTotal > 0) html += '<div class="acc-badge">' + errTotal + ' error' + (errTotal > 1 ? 'es' : '') + '</div>';
@@ -879,6 +881,7 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
         html += '<div class="info-grid">';
         html += infoItem('Sesiones reportadas', p.totalSessions !== null ? Math.round(toNum(p.totalSessions)) : '-', Math.round(p.sumSessions) === Math.round(toNum(p.totalSessions)) ? 'ok' : (p.totalSessions !== null ? 'err' : ''));
         html += infoItem('PT reportado', p.totalPagar !== null ? fmt(p.totalPagar) : '-', Math.round(p.sumMoney) === Math.round(toNum(p.totalPagar)) ? 'ok' : (p.totalPagar !== null ? 'err' : ''));
+        if (p.hasCorrecciones) html += infoItem('PT corregido', fmt(p.sumMoneyCorregido), 'ok');
         if (p.staffAmount > 0) html += infoItem('Staff', p.staffHours + 'h = ' + fmt(p.staffAmount), '');
         if (p.boxAmount > 0) html += infoItem('Box', fmt(p.boxAmount), '');
         if (p.comision > 0) html += infoItem('Comision', fmt(p.comision), '');
@@ -886,10 +889,17 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
             const ok2 = Math.round(p.totalComputed) === Math.round(toNum(p.totalAPagarReported));
             html += infoItem('Total a Pagar', fmt(p.totalAPagarReported), ok2 ? 'ok' : 'err');
         }
+        if (p.hasCorrecciones) html += infoItem('Total corregido', fmt(p.totalComputedCorregido), 'ok');
         html += '</div>';
 
         // Students table
-        html += '<table><thead><tr><th>Fila</th><th>Alumno</th><th></th><th class="num">Ses</th><th>Plan</th><th class="num">Valor</th><th class="num">Total</th></tr></thead><tbody>';
+        const showCorr = p.students.some(s => s.valorCorregido !== null || s.totalCorregido !== null);
+        html += '<table><thead><tr><th>Fila</th><th>Alumno</th><th></th><th class="num">Ses</th><th>Plan</th><th class="num">Valor</th>';
+        if (showCorr) html += '<th class="num" style="color:var(--ok)">Val.Corr</th>';
+        html += '<th class="num">Total</th>';
+        if (showCorr) html += '<th class="num" style="color:var(--ok)">Tot.Corr</th>';
+        html += '</tr></thead><tbody>';
+        const colSpan = showCorr ? 8 : 6;
         for (const s of p.students) {
             const rowClass = s.errors.length ? 'err-row' : '';
             let tags = '';
@@ -904,11 +914,13 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
             html += '<td>' + tags + '</td>';
             html += '<td class="num">' + (s.sessions || '-') + '</td>';
             html += '<td style="font-size:11px;color:var(--text2)">' + esc(s.plan) + '</td>';
-            html += '<td class="num">' + (s.valor ? fmt(s.valor) : '-') + '</td>';
-            html += '<td class="num">' + (s.total ? fmt(s.total) : '-') + '</td>';
+            html += '<td class="num"' + (s.valorCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.valor ? fmt(s.valor) : '-') + '</td>';
+            if (showCorr) html += '<td class="num" style="color:var(--ok);font-weight:600">' + (s.valorCorregido !== null ? fmt(s.valorCorregido) : '') + '</td>';
+            html += '<td class="num"' + (s.totalCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.total ? fmt(s.total) : '-') + '</td>';
+            if (showCorr) html += '<td class="num" style="color:var(--ok);font-weight:600">' + (s.totalCorregido !== null ? fmt(s.totalCorregido) : '') + '</td>';
             html += '</tr>';
             if (s.errors.length) {
-                html += '<tr class="err-row"><td></td><td colspan="6" style="padding:2px 10px 8px">';
+                html += '<tr class="err-row"><td></td><td colspan="' + colSpan + '" style="padding:2px 10px 8px">';
                 for (const e of s.errors) html += '<div style="font-size:12px;color:var(--err)">' + esc(e) + '</div>';
                 html += '</td></tr>';
             }
