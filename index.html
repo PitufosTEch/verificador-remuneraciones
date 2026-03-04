@@ -672,15 +672,24 @@ function compareEbrain(profesores, ebrainRows, mesNum, anio) {
 
     if (!filtered.length) return { comparison: [], onlyEbrain: [], totalAdmin: 0, totalEbrain: 0, noData: true };
 
+    // Find plan key
+    const planKey = Object.keys(sample).find(k => k.includes('Plan') || k.includes('Producto')) || 'Plan/Producto';
+
     // Group by professor
     const ebByProf = {};
     const ebDetail = {};
+    const ebPlans = {}; // {prof: {alumno: planStr}}
     for (const r of filtered) {
         const prof = up(r[profKey]);
         const alumno = up(r[alumnoKey]);
         ebByProf[prof] = (ebByProf[prof] || 0) + 1;
         if (!ebDetail[prof]) ebDetail[prof] = {};
         ebDetail[prof][alumno] = (ebDetail[prof][alumno] || 0) + 1;
+        // Store plan (take first non-empty)
+        if (r[planKey] && r[planKey].trim()) {
+            if (!ebPlans[prof]) ebPlans[prof] = {};
+            if (!ebPlans[prof][alumno]) ebPlans[prof][alumno] = r[planKey].trim();
+        }
     }
 
     // Find ebrain professor for admin professor
@@ -736,7 +745,7 @@ function compareEbrain(profesores, ebrainRows, mesNum, anio) {
         if (!matchedEb.has(k) && v > 0) onlyEbrain.push({ name: k, sessions: v });
     }
 
-    return { comparison, onlyEbrain, totalAdmin, totalEbrain: Object.values(ebByProf).reduce((a, b) => a + b, 0), totalEbrainMatched };
+    return { comparison, onlyEbrain, totalAdmin, totalEbrain: Object.values(ebByProf).reduce((a, b) => a + b, 0), totalEbrainMatched, ebPlans, findEbProf };
 }
 
 function buildStudentDetail(prof, ebStudents) {
@@ -789,6 +798,74 @@ function buildStudentDetail(prof, ebStudents) {
 }
 
 // ============================================================
+// ENRICH FROM EBRAIN - fill missing plans
+// ============================================================
+function enrichFromEbrain(profesores, ebrainResult) {
+    if (!ebrainResult || !ebrainResult.ebPlans) return;
+    const { ebPlans, findEbProf } = ebrainResult;
+
+    for (const prof of profesores) {
+        const ebKey = findEbProf(prof.nombre);
+        if (!ebKey || !ebPlans[ebKey]) continue;
+        const profPlans = ebPlans[ebKey];
+
+        for (const s of prof.students) {
+            if (s.sessions <= 0 || s.isCong || s.isVac) continue;
+            // Only enrich if no plan detected from Excel
+            if (s.planSes !== null && s.valor > 0 && s.valorCorregido === null) continue;
+
+            // Try to find student in Ebrain plans
+            const sName = up(s.nombre);
+            let ebPlan = null;
+            // Exact match
+            if (profPlans[sName]) { ebPlan = profPlans[sName]; }
+            else {
+                // Fuzzy match
+                for (const [eName, plan] of Object.entries(profPlans)) {
+                    if (matchNames(sName, eName) >= 1) { ebPlan = plan; break; }
+                }
+            }
+            if (!ebPlan) continue;
+
+            const ebPlanSes = parsePlan(ebPlan);
+            if (!ebPlanSes) continue;
+
+            // Case 1: Excel has no plan at all → assign from Ebrain
+            if (s.planSes === null) {
+                s.planSes = ebPlanSes;
+                s.planEbrain = ebPlan;
+                const exp = expectedPrice(ebPlanSes, s.isDuo, s.isTrio);
+                if (exp) {
+                    if (s.valor === 0) {
+                        // No price assigned
+                        s.valorCorregido = exp;
+                        s.totalCorregido = Math.round(s.sessions * exp);
+                        s.errors = s.errors.filter(e => !e.includes('Sin precio'));
+                        s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
+                    } else if (s.valor !== exp) {
+                        // Has price but no plan, price might be wrong
+                        s.valorCorregido = exp;
+                        s.totalCorregido = Math.round(s.sessions * exp);
+                        s.errors = s.errors.filter(e => !e.includes('VALOR:'));
+                        s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' corregido ' + fmt(exp));
+                    }
+                }
+            }
+            // Case 2: Excel has plan but no price (valor=0)
+            else if (s.valor === 0 && s.valorCorregido === null) {
+                const exp = expectedPrice(s.planSes, s.isDuo, s.isTrio);
+                if (exp) {
+                    s.valorCorregido = exp;
+                    s.totalCorregido = Math.round(s.sessions * exp);
+                    s.errors = s.errors.filter(e => !e.includes('Sin precio'));
+                    s.errors.push('Sin precio asignado → corregido ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
 // RUN ANALYSIS
 // ============================================================
 async function runAnalysis() {
@@ -802,18 +879,7 @@ async function runAnalysis() {
     let parsed, staffData, allErrors;
     try {
         parsed = parseExcel(workbookData);
-        showProgress(30, 'Verificando datos (' + parsed.profesores.length + ' profesores)...');
-        await new Promise(r => setTimeout(r, 100));
-
-        allErrors = verifyProfessors(parsed.profesores);
         staffData = parseStaff(workbookData);
-
-        // Staff errors
-        for (const s of staffData) {
-            if (!s.ok) {
-                allErrors.push({ prof: 'STAFF', error: s.nombre + ': ' + fmt(s.money) + ' deberia ser ' + fmt(s.expected) + ' (' + s.hours + ' x ' + fmt(STAFF_RATE) + ')' });
-            }
-        }
     } catch (err) {
         hideProgress();
         alert('Error al parsear el Excel: ' + err.message);
@@ -821,7 +887,7 @@ async function runAnalysis() {
         return;
     }
 
-    showProgress(60, 'Conectando con Ebrain...');
+    showProgress(40, 'Conectando con Ebrain...');
     let ebrainResult = null;
     let ebrainError = false;
     let ebrainCsvData = null;
@@ -829,24 +895,41 @@ async function runAnalysis() {
     try {
         ebrainCsvData = await fetchEbrain();
         if (ebrainCsvData) {
-            showProgress(80, 'Comparando con Ebrain...');
+            showProgress(60, 'Comparando con Ebrain...');
             await new Promise(r => setTimeout(r, 100));
             ebrainResult = compareEbrain(parsed.profesores, ebrainCsvData, mesNum, anio);
 
-            // Add ebrain errors
-            if (ebrainResult && ebrainResult.comparison) {
-                for (const c of ebrainResult.comparison) {
-                    if (c.status === 'DIF') {
-                        allErrors.push({ prof: c.profName, error: 'EBRAIN: Admin=' + c.adminSes + ' vs Ebrain=' + c.ebrainSes + ' (dif: ' + (c.diff > 0 ? '+' : '') + c.diff + ')' });
-                    }
-                }
-            }
+            // Enrich missing plans from Ebrain before final verification
+            showProgress(70, 'Completando planes desde Ebrain...');
+            await new Promise(r => setTimeout(r, 100));
+            enrichFromEbrain(parsed.profesores, ebrainResult);
         } else {
             ebrainError = true;
         }
     } catch (e) {
         ebrainError = true;
         console.error('Ebrain fetch error:', e);
+    }
+
+    // Verify AFTER enrichment so corrected values are included
+    showProgress(80, 'Verificando datos (' + parsed.profesores.length + ' profesores)...');
+    await new Promise(r => setTimeout(r, 100));
+    allErrors = verifyProfessors(parsed.profesores);
+
+    // Staff errors
+    for (const s of staffData) {
+        if (!s.ok) {
+            allErrors.push({ prof: 'STAFF', error: s.nombre + ': ' + fmt(s.money) + ' deberia ser ' + fmt(s.expected) + ' (' + s.hours + ' x ' + fmt(STAFF_RATE) + ')' });
+        }
+    }
+
+    // Ebrain diff errors
+    if (ebrainResult && ebrainResult.comparison) {
+        for (const c of ebrainResult.comparison) {
+            if (c.status === 'DIF') {
+                allErrors.push({ prof: c.profName, error: 'EBRAIN: Admin=' + c.adminSes + ' vs Ebrain=' + c.ebrainSes + ' (dif: ' + (c.diff > 0 ? '+' : '') + c.diff + ')' });
+            }
+        }
     }
 
     showProgress(100, 'Listo!');
@@ -931,7 +1014,8 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
             html += '<td>' + esc(s.nombre) + '</td>';
             html += '<td>' + tags + '</td>';
             html += '<td class="num">' + (s.sessions || '-') + '</td>';
-            html += '<td style="font-size:11px;color:var(--text2)">' + esc(s.plan) + '</td>';
+            const planDisplay = s.planEbrain ? '<span style="color:cornflowerblue" title="Plan obtenido de Ebrain">' + esc(s.planEbrain) + ' <small>(EB)</small></span>' : esc(s.plan);
+            html += '<td style="font-size:11px;color:var(--text2)">' + planDisplay + '</td>';
             html += '<td class="num"' + (s.valorCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.valor ? fmt(s.valor) : '-') + '</td>';
             if (showCorr) html += '<td class="num" style="color:var(--ok);font-weight:600">' + (s.valorCorregido !== null ? fmt(s.valorCorregido) : '') + '</td>';
             html += '<td class="num"' + (s.totalCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.total ? fmt(s.total) : '-') + '</td>';
