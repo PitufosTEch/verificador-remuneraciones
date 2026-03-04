@@ -927,6 +927,40 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
         }
         html += '</tbody></table>';
 
+        // Ebrain comparison inline for this professor
+        if (ebrainResult && ebrainResult.comparison) {
+            const ec = ebrainResult.comparison.find(c => c.profName === p.nombre);
+            if (ec && ec.status !== 'OK') {
+                html += '<div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:var(--rs);border:1px solid var(--border)">';
+                html += '<div style="font-size:12px;color:var(--text2);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Comparacion Ebrain</div>';
+                if (ec.status === 'NO MATCH') {
+                    html += '<div style="font-size:13px;color:var(--warn)">No se encontro match en Ebrain para este profesor.</div>';
+                } else {
+                    html += '<div style="font-size:13px;margin-bottom:8px">Admin: <b>' + ec.adminSes + '</b> ses &middot; Ebrain: <b>' + ec.ebrainSes + '</b> ses &middot; Diferencia: <b style="color:var(--err)">' + (ec.diff > 0 ? '+' : '') + ec.diff + '</b></div>';
+                    if (ec.detail && ec.detail.length) {
+                        // Only show students with differences
+                        const diffs = ec.detail.filter(d => d.status !== 'OK');
+                        if (diffs.length) {
+                            html += '<table style="font-size:12px"><thead><tr><th>Alumno</th><th class="num">Admin</th><th class="num">Ebrain</th><th class="num">Dif</th><th></th></tr></thead><tbody>';
+                            for (const d of diffs) {
+                                html += '<tr class="err-row">';
+                                html += '<td>' + esc(d.alumno) + '</td>';
+                                html += '<td class="num">' + (d.adminSes !== null ? d.adminSes : '-') + '</td>';
+                                html += '<td class="num">' + (d.ebrainSes !== null ? d.ebrainSes : '-') + '</td>';
+                                html += '<td class="num">' + (d.diff !== null ? (d.diff > 0 ? '+' : '') + d.diff : '-') + '</td>';
+                                html += '<td>' + statusTag(d.status) + '</td>';
+                                html += '</tr>';
+                            }
+                            html += '</tbody></table>';
+                        }
+                    }
+                }
+                html += '</div>';
+            } else if (ec && ec.status === 'OK') {
+                html += '<div style="margin-top:8px;font-size:12px;color:var(--ok)">Ebrain: OK (' + ec.ebrainSes + ' sesiones coinciden)</div>';
+            }
+        }
+
         // Professor-level errors
         if (p.errors.length) {
             html += '<div class="err-list">';
