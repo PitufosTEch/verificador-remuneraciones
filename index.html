@@ -280,9 +280,13 @@ function fmt(n) {
 
 function parsePlan(s) {
     if (!s) return null;
-    const m = String(s).trim().toLowerCase().match(/(\d+)\s*sesion/);
+    const t = String(s).trim().toLowerCase();
+    const m = t.match(/(\d+)\s*ses/);
     return m ? parseInt(m[1]) : null;
 }
+
+function planIsDuo(s) { return s && /\bduo\b/i.test(String(s)); }
+function planIsTrio(s) { return s && /\btrio\b/i.test(String(s)); }
 
 function expectedPrice(planSes, isDuo, isTrio) {
     if (isTrio) return 18000;
@@ -488,8 +492,8 @@ function parseExcel(wb) {
         if (C && up(C) !== 'SOCIO' && !(E && up(E) === 'FECHA PLAN')) {
             if ((bStr === 'REEMPLAZOS' || bStr === 'REEMPLAZO') && (!J || J === 0)) continue;
 
-            const isDuo = bStr === 'DUO';
-            const isTrio = bStr === 'TRIO';
+            const isDuo = bStr === 'DUO' || planIsDuo(H);
+            const isTrio = bStr === 'TRIO' || planIsTrio(H);
             const isCong = bStr === 'CONGELO' || bStr === 'CONGELADA';
             const isVac = bStr.includes('VACACION');
             const isReemp = (D && String(D).toLowerCase().includes('reemplazo')) ||
@@ -858,8 +862,6 @@ function enrichFromEbrain(profesores, ebrainResult) {
 
         for (const s of prof.students) {
             if (s.sessions <= 0 || s.isCong || s.isVac) continue;
-            // Only enrich if no plan detected from Excel or no price
-            if (s.planSes !== null && s.valor > 0 && s.valorCorregido === null) continue;
 
             const ebPlan = findPlanInEbrain(s.nombre, profPlans, ebPlans);
             if (!ebPlan) continue;
@@ -868,43 +870,44 @@ function enrichFromEbrain(profesores, ebrainResult) {
             if (!ebPlanSes) continue;
 
             // Detect DUO/TRIO from Ebrain plan text (e.g. "72 sesiones DUO")
-            const ebPlanUp = up(ebPlan);
-            const ebIsDuo = ebPlanUp.includes('DUO') || s.isDuo;
-            const ebIsTrio = ebPlanUp.includes('TRIO') || s.isTrio;
+            const ebIsDuo = planIsDuo(ebPlan) || s.isDuo;
+            const ebIsTrio = planIsTrio(ebPlan) || s.isTrio;
             // Update student flags if Ebrain reveals DUO/TRIO
-            if (ebPlanUp.includes('DUO') && !s.isDuo) s.isDuo = true;
-            if (ebPlanUp.includes('TRIO') && !s.isTrio) s.isTrio = true;
+            if (planIsDuo(ebPlan) && !s.isDuo) s.isDuo = true;
+            if (planIsTrio(ebPlan) && !s.isTrio) s.isTrio = true;
 
             const exp = expectedPrice(ebPlanSes, ebIsDuo, ebIsTrio);
+            if (!exp) continue;
 
-            // Case 1: Excel has no plan at all → assign from Ebrain
+            // Determine effective current valor (use existing correction if any)
+            const curValor = s.valorCorregido || s.valor;
+
+            // Case 1: Excel has no plan → assign from Ebrain
             if (s.planSes === null) {
                 s.planSes = ebPlanSes;
                 s.planEbrain = ebPlan;
-                if (exp) {
-                    if (s.valor === 0) {
-                        s.valorCorregido = exp;
-                        s.totalCorregido = Math.round(s.sessions * exp);
-                        s.errors = s.errors.filter(e => !e.includes('Sin precio'));
-                        s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
-                    } else if (s.valor !== exp) {
-                        s.valorCorregido = exp;
-                        s.totalCorregido = Math.round(s.sessions * exp);
-                        s.errors = s.errors.filter(e => !e.includes('VALOR:'));
-                        s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
-                    }
+                if (s.valor === 0 && s.valorCorregido === null) {
+                    s.valorCorregido = exp;
+                    s.totalCorregido = Math.round(s.sessions * exp);
+                    s.errors = s.errors.filter(e => !e.includes('Sin precio'));
+                    s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
+                } else if (curValor !== exp) {
+                    s.valorCorregido = exp;
+                    s.totalCorregido = Math.round(s.sessions * exp);
+                    s.errors = s.errors.filter(e => !e.includes('VALOR:') && !e.includes('Plan Ebrain'));
+                    s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
                 }
             }
-            // Case 2: Has plan but Ebrain reveals DUO/TRIO not marked in Excel, or wrong price
-            else if (exp && s.valor > 0 && s.valor !== exp) {
+            // Case 2: Has plan but Ebrain reveals different price (DUO/TRIO, or wrong calculation)
+            else if (curValor !== exp) {
                 s.planEbrain = ebPlan;
                 s.valorCorregido = exp;
                 s.totalCorregido = Math.round(s.sessions * exp);
-                s.errors = s.errors.filter(e => !e.includes('VALOR:'));
-                s.errors.push('Plan Ebrain: ' + ebPlan + (ebIsDuo ? ' (DUO)' : '') + (ebIsTrio ? ' (TRIO)' : '') + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
+                s.errors = s.errors.filter(e => !e.includes('VALOR:') && !e.includes('Plan Ebrain'));
+                s.errors.push('Plan Ebrain: ' + ebPlan + (ebIsDuo && !planIsDuo(s.plan) ? ' (DUO)' : '') + (ebIsTrio && !planIsTrio(s.plan) ? ' (TRIO)' : '') + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
             }
             // Case 3: Has plan but no price
-            else if (s.valor === 0 && s.valorCorregido === null && exp) {
+            else if (s.valor === 0 && s.valorCorregido === null) {
                 s.planEbrain = ebPlan;
                 s.valorCorregido = exp;
                 s.totalCorregido = Math.round(s.sessions * exp);
