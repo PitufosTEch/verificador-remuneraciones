@@ -324,9 +324,18 @@ function csvLine(line) {
 
 function parseDate(s) {
     if (!s) return null;
-    const p = s.split('-');
-    if (p.length !== 3) return null;
-    return { day: parseInt(p[0]), month: parseInt(p[1]), year: parseInt(p[2]) };
+    s = s.trim();
+    // Try dd-mm-yyyy or dd/mm/yyyy
+    let p = s.split(/[-\/]/);
+    if (p.length === 3) {
+        const a = parseInt(p[0]), b = parseInt(p[1]), c = parseInt(p[2]);
+        if (c > 1000) return { day: a, month: b, year: c }; // dd-mm-yyyy
+        if (a > 1000) return { day: c, month: b, year: a }; // yyyy-mm-dd
+    }
+    // Try JS Date parse as fallback
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return { day: d.getDate(), month: d.getMonth() + 1, year: d.getFullYear() };
+    return null;
 }
 
 function nameParts(n) { return up(n).split(/\s+/).filter(p => p.length > 2); }
@@ -680,8 +689,8 @@ function compareEbrain(profesores, ebrainRows, mesNum, anio) {
     const ebDetail = {};
     const ebPlans = {}; // {prof: {alumno: planStr}}
     for (const r of filtered) {
-        const prof = up(r[profKey]);
-        const alumno = up(r[alumnoKey]);
+        const prof = up(r[profKey]).replace(/\s+/g, ' ').trim();
+        const alumno = up(r[alumnoKey]).replace(/\s+/g, ' ').trim();
         ebByProf[prof] = (ebByProf[prof] || 0) + 1;
         if (!ebDetail[prof]) ebDetail[prof] = {};
         ebDetail[prof][alumno] = (ebDetail[prof][alumno] || 0) + 1;
