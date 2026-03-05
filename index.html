@@ -1074,7 +1074,9 @@ async function runAnalysis() {
 function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, mesNum, anio, ebrainCsvData) {
     const profs = parsed.profesores;
     const totalSes = profs.reduce((a, p) => a + (p.sumSessions || 0), 0);
-    const grandTotal = profs.reduce((a, p) => a + (p.totalComputed || 0), 0);
+    const grandTotalOrig = profs.reduce((a, p) => a + (p.totalComputed || 0), 0);
+    const grandTotalCorr = profs.reduce((a, p) => a + (p.totalComputedCorregido || p.totalComputed || 0), 0);
+    const hasGlobalCorr = Math.round(grandTotalCorr) !== Math.round(grandTotalOrig);
     const errCount = allErrors.length;
     const mesName = MESES[mesNum];
 
@@ -1084,7 +1086,7 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
     html += '<div class="cards">';
     html += card('Profesores', profs.length, profs.filter(p => p.errors.length || p.students.some(s => s.errors.length)).length + ' con observaciones');
     html += card('Sesiones Totales', Math.round(totalSes), mesName + ' ' + anio);
-    html += card('Monto Total', fmt(grandTotal), 'PT + Staff + Box + Comision');
+    html += card('Monto Total', fmt(grandTotalCorr), hasGlobalCorr ? 'Corregido (original: ' + fmt(grandTotalOrig) + ')' : 'PT + Staff + Box + Comision');
     html += '<div class="card"><div class="card-label">Errores</div><div class="card-value ' + (errCount ? 'err' : 'ok') + '">' + errCount + '</div><div class="card-sub">' + (errCount ? 'Requieren revision' : 'Todo correcto') + '</div></div>';
     html += '</div>';
 
