@@ -137,6 +137,7 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
 .tag-trio { background:rgba(201,168,76,.3); color:var(--gold2); }
 .tag-cong { background:rgba(255,204,0,.15); color:var(--warn); }
 .tag-reemp { background:rgba(100,149,237,.15); color:cornflowerblue; }
+.tag-warn { background:rgba(255,204,0,.15); color:var(--warn); }
 
 /* Error list inside accordion */
 .err-list { margin-top:12px; padding:12px; background:rgba(255,59,48,.06); border-radius:var(--rs); border:1px solid rgba(255,59,48,.15); }
@@ -845,37 +846,69 @@ function normName(n) {
 }
 
 function findPlanInEbrain(studentName, profPlans, allEbPlans) {
+    // Returns { plan, confidence: 'exact'|'high'|'medium'|'low', matchedName, source } or null
     const sNorm = normName(studentName);
     const sParts = sNorm.split(' ').filter(p => p.length >= 3);
+    if (!sParts.length) return null;
 
-    // Search function: try exact, then fuzzy within a plan dict
-    function searchIn(plans, minScore) {
-        if (!plans) return null;
-        // Exact normalized match
-        for (const [eName, plan] of Object.entries(plans)) {
-            if (normName(eName) === sNorm) return plan;
-        }
-        // Fuzzy: require minScore parts matching
-        for (const [eName, plan] of Object.entries(plans)) {
-            const eParts = normName(eName).split(' ').filter(p => p.length >= 3);
-            const score = sParts.reduce((c, sp) => c + (eParts.some(ep => ep.includes(sp) || sp.includes(ep) || (sp.length >= 4 && ep.length >= 4 && sp.substring(0,4) === ep.substring(0,4))) ? 1 : 0), 0);
-            if (score >= minScore) return plan;
-        }
-        return null;
+    function scoreName(eName) {
+        const eNorm = normName(eName);
+        if (eNorm === sNorm) return { score: 999, matchedName: eName, confidence: 'exact' };
+        const eParts = eNorm.split(' ').filter(p => p.length >= 3);
+        if (!eParts.length) return null;
+        // Count matching parts (bidirectional)
+        const fwd = sParts.reduce((c, sp) => c + (eParts.some(ep => ep === sp || (ep.length >= 4 && sp.length >= 4 && (ep.includes(sp) || sp.includes(ep)))) ? 1 : 0), 0);
+        const rev = eParts.reduce((c, ep) => c + (sParts.some(sp => sp === ep || (ep.length >= 4 && sp.length >= 4 && (sp.includes(ep) || ep.includes(sp)))) ? 1 : 0), 0);
+        const score = Math.min(fwd, rev); // both directions must match
+        const maxParts = Math.max(sParts.length, eParts.length);
+        const ratio = score / maxParts;
+        let confidence;
+        if (score >= 2 && ratio >= 0.6) confidence = 'high';
+        else if (score >= 2 && ratio >= 0.4) confidence = 'medium';
+        else if (score >= 1) confidence = 'low';
+        else return null;
+        return { score, matchedName: eName, confidence, ratio };
     }
 
-    // 1. Search within matched professor (1 part match is enough - same prof context)
-    let found = searchIn(profPlans, 1);
-    if (found) return found;
+    function bestInPlans(plans) {
+        if (!plans) return null;
+        let best = null;
+        for (const [eName, plan] of Object.entries(plans)) {
+            const r = scoreName(eName);
+            if (!r) continue;
+            if (r.confidence === 'exact') return { ...r, plan };
+            if (!best || r.score > best.score || (r.score === best.score && r.ratio > best.ratio)) {
+                best = { ...r, plan };
+            }
+        }
+        return best;
+    }
 
-    // 2. Fallback: search across ALL professors (require 2+ parts to avoid false positives)
+    // 1. Search within matched professor
+    const profMatch = bestInPlans(profPlans);
+    if (profMatch && profMatch.confidence === 'exact') return { ...profMatch, source: 'profesor' };
+    if (profMatch && profMatch.confidence === 'high') return { ...profMatch, source: 'profesor' };
+
+    // 2. Cross-professor search
+    let crossBest = null;
     if (allEbPlans) {
         for (const [profKey, plans] of Object.entries(allEbPlans)) {
             if (plans === profPlans) continue;
-            found = searchIn(plans, 2);
-            if (found) return found;
+            const r = bestInPlans(plans);
+            if (!r) continue;
+            if (r.confidence === 'exact') return { ...r, source: 'otro profesor' };
+            if (!crossBest || r.score > crossBest.score || (r.score === crossBest.score && (r.ratio || 0) > (crossBest.ratio || 0))) {
+                crossBest = { ...r, source: 'otro profesor' };
+            }
         }
     }
+
+    // Return best available, preferring professor match
+    if (profMatch && profMatch.confidence === 'medium') return { ...profMatch, source: 'profesor' };
+    if (crossBest && (crossBest.confidence === 'high' || crossBest.confidence === 'medium')) return { ...crossBest };
+    // Low confidence - still return but flagged
+    if (profMatch) return { ...profMatch, source: 'profesor' };
+    if (crossBest) return { ...crossBest };
     return null;
 }
 
@@ -890,56 +923,72 @@ function enrichFromEbrain(profesores, ebrainResult) {
         for (const s of prof.students) {
             if (s.sessions <= 0 || s.isCong || s.isVac) continue;
 
-            const ebPlan = findPlanInEbrain(s.nombre, profPlans, ebPlans);
-            if (!ebPlan) continue;
+            const match = findPlanInEbrain(s.nombre, profPlans, ebPlans);
+            if (!match) continue;
 
+            const { plan: ebPlan, confidence, matchedName, source } = match;
             const ebPlanSes = parsePlan(ebPlan);
             if (!ebPlanSes) continue;
 
-            // Detect DUO/TRIO from Ebrain plan text (e.g. "72 sesiones DUO")
+            // LOW confidence → only warn, never apply correction
+            if (confidence === 'low') {
+                s.matchWarning = 'Match dudoso en Ebrain: "' + matchedName + '" (' + source + ') → ' + ebPlan + '. Verificar manualmente.';
+                s.warnings = s.warnings || [];
+                s.warnings.push(s.matchWarning);
+                continue;
+            }
+
+            // MEDIUM confidence → apply but flag warning
+            if (confidence === 'medium') {
+                s.matchWarning = 'Match parcial: "' + matchedName + '" (' + source + '). Verificar.';
+            }
+
+            // Detect DUO/TRIO from Ebrain plan text
             const ebIsDuo = planIsDuo(ebPlan) || s.isDuo;
             const ebIsTrio = planIsTrio(ebPlan) || s.isTrio;
-            // Update student flags if Ebrain reveals DUO/TRIO
             if (planIsDuo(ebPlan) && !s.isDuo) s.isDuo = true;
             if (planIsTrio(ebPlan) && !s.isTrio) s.isTrio = true;
 
             const exp = expectedPrice(ebPlanSes, ebIsDuo, ebIsTrio);
             if (!exp) continue;
 
-            // Determine effective current valor (use existing correction if any)
             const curValor = s.valorCorregido || s.valor;
+            const confLabel = confidence === 'medium' ? ' [match parcial]' : '';
 
             // Case 1: Excel has no plan → assign from Ebrain
             if (s.planSes === null) {
                 s.planSes = ebPlanSes;
                 s.planEbrain = ebPlan;
+                s.planEbrainName = matchedName;
                 if (s.valor === 0 && s.valorCorregido === null) {
                     s.valorCorregido = exp;
                     s.totalCorregido = Math.round(s.sessions * exp);
                     s.errors = s.errors.filter(e => !e.includes('Sin precio'));
-                    s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
+                    s.errors.push('Sin plan en Excel → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido) + confLabel);
                 } else if (curValor !== exp) {
                     s.valorCorregido = exp;
                     s.totalCorregido = Math.round(s.sessions * exp);
                     s.errors = s.errors.filter(e => !e.includes('VALOR:') && !e.includes('Plan Ebrain'));
-                    s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
+                    s.errors.push('Plan Ebrain: ' + ebPlan + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp) + confLabel);
                 }
             }
             // Case 2: Has plan but Ebrain reveals different price (DUO/TRIO, or wrong calculation)
             else if (curValor !== exp) {
                 s.planEbrain = ebPlan;
+                s.planEbrainName = matchedName;
                 s.valorCorregido = exp;
                 s.totalCorregido = Math.round(s.sessions * exp);
                 s.errors = s.errors.filter(e => !e.includes('VALOR:') && !e.includes('Plan Ebrain'));
-                s.errors.push('Plan Ebrain: ' + ebPlan + (ebIsDuo && !planIsDuo(s.plan) ? ' (DUO)' : '') + (ebIsTrio && !planIsTrio(s.plan) ? ' (TRIO)' : '') + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp));
+                s.errors.push('Plan Ebrain: ' + ebPlan + (ebIsDuo && !planIsDuo(s.plan) ? ' (DUO)' : '') + (ebIsTrio && !planIsTrio(s.plan) ? ' (TRIO)' : '') + ' → valor reportado ' + fmt(s.valor) + ' → corregido ' + fmt(exp) + confLabel);
             }
             // Case 3: Has plan but no price
             else if (s.valor === 0 && s.valorCorregido === null) {
                 s.planEbrain = ebPlan;
+                s.planEbrainName = matchedName;
                 s.valorCorregido = exp;
                 s.totalCorregido = Math.round(s.sessions * exp);
                 s.errors = s.errors.filter(e => !e.includes('Sin precio'));
-                s.errors.push('Sin precio → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido));
+                s.errors.push('Sin precio → Ebrain: ' + ebPlan + ' → valor ' + fmt(exp) + ' = ' + fmt(s.totalCorregido) + confLabel);
             }
         }
     }
@@ -1082,29 +1131,37 @@ function renderResults(parsed, staffData, allErrors, ebrainResult, ebrainError, 
         html += '</tr></thead><tbody>';
         const colSpan = showCorr ? 8 : 6;
         for (const s of p.students) {
-            const rowClass = s.errors.length ? 'err-row' : '';
+            const hasWarn = s.matchWarning || (s.warnings && s.warnings.length);
+            const rowClass = s.errors.length ? 'err-row' : (hasWarn ? 'err-row' : '');
             let tags = '';
             if (s.isDuo) tags += '<span class="tag tag-duo">DUO</span> ';
             if (s.isTrio) tags += '<span class="tag tag-trio">TRIO</span> ';
             if (s.isCong) tags += '<span class="tag tag-cong">CONG</span> ';
             if (s.isReemp) tags += '<span class="tag tag-reemp">REEMP</span> ';
+            if (hasWarn && !s.errors.length) tags += '<span class="tag tag-warn">?</span> ';
 
             html += '<tr class="' + rowClass + '">';
             html += '<td style="color:var(--text3)">' + s.row + '</td>';
             html += '<td>' + esc(s.nombre) + '</td>';
             html += '<td>' + tags + '</td>';
             html += '<td class="num">' + (s.sessions || '-') + '</td>';
-            const planDisplay = s.planEbrain ? '<span style="color:cornflowerblue" title="Plan obtenido de Ebrain">' + esc(s.planEbrain) + ' <small>(EB)</small></span>' : esc(s.plan);
+            let planDisplay = esc(s.plan);
+            if (s.planEbrain) {
+                const nameInfo = s.planEbrainName ? ' title="Matcheado con: ' + esc(s.planEbrainName) + '"' : '';
+                planDisplay = '<span style="color:cornflowerblue"' + nameInfo + '>' + esc(s.planEbrain) + ' <small>(EB)</small></span>';
+            }
             html += '<td style="font-size:11px;color:var(--text2)">' + planDisplay + '</td>';
             html += '<td class="num"' + (s.valorCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.valor ? fmt(s.valor) : '-') + '</td>';
             if (showCorr) html += '<td class="num" style="color:var(--ok);font-weight:600">' + (s.valorCorregido !== null ? fmt(s.valorCorregido) : '') + '</td>';
             html += '<td class="num"' + (s.totalCorregido !== null ? ' style="text-decoration:line-through;color:var(--err)"' : '') + '>' + (s.total ? fmt(s.total) : '-') + '</td>';
             if (showCorr) html += '<td class="num" style="color:var(--ok);font-weight:600">' + (s.totalCorregido !== null ? fmt(s.totalCorregido) : '') + '</td>';
             html += '</tr>';
-            if (s.errors.length) {
-                html += '<tr class="err-row"><td></td><td colspan="' + colSpan + '" style="padding:2px 10px 8px">';
-                for (const e of s.errors) html += '<div style="font-size:12px;color:var(--err)">' + esc(e) + '</div>';
-                html += '</td></tr>';
+            const msgs = [];
+            for (const e of s.errors) msgs.push('<div style="font-size:12px;color:var(--err)">' + esc(e) + '</div>');
+            if (s.warnings) for (const w of s.warnings) msgs.push('<div style="font-size:12px;color:var(--warn)">&#9888; ' + esc(w) + '</div>');
+            else if (s.matchWarning && !s.errors.length) msgs.push('<div style="font-size:12px;color:var(--warn)">&#9888; ' + esc(s.matchWarning) + '</div>');
+            if (msgs.length) {
+                html += '<tr class="err-row"><td></td><td colspan="' + colSpan + '" style="padding:2px 10px 8px">' + msgs.join('') + '</td></tr>';
             }
         }
         html += '</tbody></table>';
