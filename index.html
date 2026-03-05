@@ -849,30 +849,30 @@ function findPlanInEbrain(studentName, profPlans, allEbPlans) {
     const sParts = sNorm.split(' ').filter(p => p.length >= 3);
 
     // Search function: try exact, then fuzzy within a plan dict
-    function searchIn(plans) {
+    function searchIn(plans, minScore) {
         if (!plans) return null;
         // Exact normalized match
         for (const [eName, plan] of Object.entries(plans)) {
             if (normName(eName) === sNorm) return plan;
         }
-        // Fuzzy: at least 1 part matches (substring check)
+        // Fuzzy: require minScore parts matching
         for (const [eName, plan] of Object.entries(plans)) {
             const eParts = normName(eName).split(' ').filter(p => p.length >= 3);
             const score = sParts.reduce((c, sp) => c + (eParts.some(ep => ep.includes(sp) || sp.includes(ep) || (sp.length >= 4 && ep.length >= 4 && sp.substring(0,4) === ep.substring(0,4))) ? 1 : 0), 0);
-            if (score >= 1) return plan;
+            if (score >= minScore) return plan;
         }
         return null;
     }
 
-    // 1. Search within matched professor
-    let found = searchIn(profPlans);
+    // 1. Search within matched professor (1 part match is enough - same prof context)
+    let found = searchIn(profPlans, 1);
     if (found) return found;
 
-    // 2. Fallback: search across ALL professors in Ebrain
+    // 2. Fallback: search across ALL professors (require 2+ parts to avoid false positives)
     if (allEbPlans) {
         for (const [profKey, plans] of Object.entries(allEbPlans)) {
-            if (plans === profPlans) continue; // already searched
-            found = searchIn(plans);
+            if (plans === profPlans) continue;
+            found = searchIn(plans, 2);
             if (found) return found;
         }
     }
